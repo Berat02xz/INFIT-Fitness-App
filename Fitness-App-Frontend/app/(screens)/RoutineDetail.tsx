@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Image,
@@ -20,6 +20,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ROUTINES, type RoutineExercise } from "@/constants/workoutRoutines";
 import { SquircleSurface } from "@/components/ui/Squircle";
 import { theme } from "@/constants/theme";
+import { SavedRoutine } from "@/models/SavedRoutine";
+import database from "@/database/database";
+import { getUserIdFromToken } from "@/api/TokenDecoder";
+import { haptics } from "@/utils/haptics";
 
 const H_PAD = 20;
 const CARD_MARGIN = 16;
@@ -124,8 +128,43 @@ export default function RoutineDetail() {
   const heroBlurTarget = useRef<View | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [saved, setSaved] = useState(false);
+  const userIdRef = useRef<string | null>(null);
 
   const routine = ROUTINES.find((item) => item.id === routineId);
+
+  // Resolve the current user + initial saved state on mount.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const userId = await getUserIdFromToken();
+        if (!active) return;
+        userIdRef.current = userId;
+        if (userId && routine) {
+          const isSaved = await SavedRoutine.isSaved(database, userId, routine.id);
+          if (active) setSaved(isSaved);
+        }
+      } catch {
+        // leave default (unsaved) on failure
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [routine]);
+
+  const handleToggleSave = async () => {
+    const userId = userIdRef.current;
+    if (!userId || !routine) return;
+    try {
+      const nowSaved = await SavedRoutine.toggle(database, userId, routine.id);
+      setSaved(nowSaved);
+      if (nowSaved) haptics.success();
+      else haptics.light();
+    } catch {
+      // ignore persistence failure — keep current UI state
+    }
+  };
   const heroHeight = Math.min(470, Math.max(390, height * 0.55));
   const cardWidth = width - CARD_MARGIN * 2;
 
@@ -353,7 +392,7 @@ export default function RoutineDetail() {
       />
       <View style={[s.ctaWrap, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <Pressable
-          onPress={() => setSaved((v) => !v)}
+          onPress={handleToggleSave}
           accessibilityRole="button"
           accessibilityLabel={saved ? "Remove from saved" : "Save routine"}
           style={({ pressed }) => [s.saveHit, pressed && s.pressed]}

@@ -7,11 +7,13 @@ import {
 } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import ChatbotScreen from "./chatbot/index";
 import WorkoutScreen from "./workout/index";
 import NutritionScreen from "./nutrition/index";
 import ProfileScreen from "./profile/index";
 import { TabBar } from "@/components/ui/TabBarUi/TabBar";
+import { TabBarVisibilityProvider } from "@/components/ui/TabBarUi/TabBarVisibility";
+import AskBar from "@/components/ui/AskBar/AskBar";
+import { AskBarProvider } from "@/components/ui/AskBar/AskBarContext";
 import { theme } from "@/constants/theme";
 import { ensureAuthenticatedSession } from "@/api/AuthSession";
 import { router } from "expo-router";
@@ -26,6 +28,7 @@ export default function AppLayout() {
   const { width } = useWindowDimensions();
   const isLargeScreen = width > 1400;
   const [authReady, setAuthReady] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState(lastActiveTab);
 
   React.useEffect(() => {
     let active = true;
@@ -57,6 +60,8 @@ export default function AppLayout() {
 
   return (
     <BottomSheetModalProvider>
+    <TabBarVisibilityProvider>
+    <AskBarProvider>
     <View style={{ flex: 1, flexDirection: isLargeScreen ? "row" : "column", backgroundColor: theme.backgroundColor }}>
       <Tab.Navigator
         initialRouteName={lastActiveTab}
@@ -74,7 +79,9 @@ export default function AppLayout() {
           state: (e) => {
             const state = e.data?.state;
             if (state) {
-              lastActiveTab = state.routes[state.index]?.name ?? "workout";
+              const name = state.routes[state.index]?.name ?? "workout";
+              lastActiveTab = name;
+              setActiveTab(name);
             }
           },
         }}
@@ -90,17 +97,16 @@ export default function AppLayout() {
           options={{ tabBarLabel: "Nutrition" }}
         />
         <Tab.Screen
-          name="chatbot"
-          component={ChatbotScreen}
-          options={{ tabBarLabel: "Chatbot" }}
-        />
-        <Tab.Screen
           name="profile"
           component={ProfileScreen}
           options={{ tabBarLabel: "Profile" }}
         />
       </Tab.Navigator>
+
+      {!isLargeScreen && <AskBar activeTab={activeTab} />}
     </View>
+    </AskBarProvider>
+    </TabBarVisibilityProvider>
     </BottomSheetModalProvider>
   );
 }

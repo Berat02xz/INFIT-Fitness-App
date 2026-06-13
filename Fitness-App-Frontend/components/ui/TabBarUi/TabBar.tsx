@@ -20,6 +20,8 @@ import Animated, {
 import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useTabBarVisibility } from "./TabBarVisibility";
+import { haptics } from "@/utils/haptics";
 
 const ICON_ACTIVE = "#000000";
 const ICON_INACTIVE = "rgba(255,255,255,0.45)";
@@ -68,6 +70,7 @@ export function TabBar({
   vertical,
 }: BottomTabBarProps & { vertical?: boolean }) {
   const insets = useSafeAreaInsets();
+  const { hidden } = useTabBarVisibility();
 
   const tabBarWidth = BTN_W * state.routes.length + BAR_PAD * 2;
   const circleXFor = (index: number) => BAR_PAD + BTN_W * index + (BTN_W - CIRCLE) / 2;
@@ -81,13 +84,13 @@ export function TabBar({
 
   const isChatbot = state.routes[state.index]?.name === "chatbot";
 
-  // hide/show for chatbot screen — fast, no bounce
+  // hide/show for chatbot screen + any screen that requests it (e.g. workout chat mode)
   useEffect(() => {
-    hideY.value = withTiming(isChatbot ? 130 : 0, {
+    hideY.value = withTiming(isChatbot || hidden ? 130 : 0, {
       duration: 260,
       easing: Easing.out(Easing.cubic),
     });
-  }, [isChatbot]);
+  }, [isChatbot, hidden]);
 
   // circle indicator — fast cubic ease, zero bounce
   useEffect(() => {
@@ -165,6 +168,7 @@ export function TabBar({
             const isFocused = state.index === index;
 
             const onPress = () => {
+              haptics.selection();
               circleX.value = withTiming(circleXFor(index), {
                 duration: 200,
                 easing: Easing.out(Easing.cubic),
@@ -187,6 +191,8 @@ export function TabBar({
                 accessibilityState={isFocused ? { selected: true } : {}}
                 accessibilityLabel={options.tabBarAccessibilityLabel ?? route.name}
                 onPress={onPress}
+                onPressIn={() => { pressScale.value = withTiming(0.94, { duration: 110 }); }}
+                onPressOut={() => { pressScale.value = withSpring(1, { damping: 18, stiffness: 320 }); }}
                 style={styles.tabBtn}
                 activeOpacity={0.72}
               >
@@ -205,6 +211,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     alignSelf: "center",
     zIndex: 10,
+    borderRadius: BAR_HEIGHT / 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,

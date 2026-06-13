@@ -8,11 +8,11 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TextInput,
   TouchableOpacity,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   Keyboard,
   ScrollView,
@@ -35,6 +35,7 @@ import { SavedMessage } from "@/models/SavedMessage";
 import { ExerciseApi } from "@/api/ExerciseApi";
 import { Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { haptics } from "@/utils/haptics";
 
 interface Message {
   id: string;
@@ -76,6 +77,8 @@ const AI_VIDEOS = [
   require('@/assets/videos/AI.mp4'),
 ];
 
+const PROFILE_AVATAR = require('@/assets/avatars/avatar1.jpg');
+
 
 
 const THINKING_MESSAGES = [
@@ -87,13 +90,21 @@ const THINKING_MESSAGES = [
 // Persist chat messages across component remounts (e.g. navigating to ExerciseDetail and back)
 let _cachedMessages: Message[] = [];
 
-export default function Chatbot() {
+type ChatbotProps = {
+  /** When hosted outside the tab (e.g. workout chat mode), close instead of switching tabs. */
+  onRequestClose?: () => void;
+  /** Auto-send this message once on mount (seeded from the workout ask bar). */
+  initialMessage?: string;
+};
+
+export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps = {}) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation() as any;
   const [messages, setMessages] = useState<Message[]>(_cachedMessages);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showSavedMessages, setShowSavedMessages] = useState(false);
   const [savedMessages, setSavedMessages] = useState<SavedMessage[]>([]);
   const [savedMessageIds, setSavedMessageIds] = useState<Set<string>>(new Set());
@@ -189,6 +200,10 @@ export default function Chatbot() {
       loadDailyCount();
 
       const onBackPress = () => {
+        if (onRequestClose) {
+          onRequestClose();
+          return true;
+        }
         navigation.navigate("nutrition");
         return true;
       };
@@ -209,18 +224,20 @@ export default function Chatbot() {
   );
 
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      'keyboardDidShow',
-      () => setKeyboardVisible(true)
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      'keyboardDidHide',
-      () => setKeyboardVisible(false)
-    );
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvt, (e: any) => {
+      setKeyboardVisible(true);
+      setKeyboardHeight(e?.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvt, () => {
+      setKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
 
     return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
+      showSub.remove();
+      hideSub.remove();
     };
   }, []);
 
@@ -601,6 +618,7 @@ export default function Chatbot() {
   const sendMessage = async (messageText?: string) => {
     const textToSend = messageText || inputText.trim();
     if (!textToSend || isLoading) return;
+    haptics.light();
 
     // Enforce daily limit for FREE users
     const isFree = subscriptionPlan === 'FREE' || subscriptionPlan === 'Free';
@@ -719,6 +737,16 @@ export default function Chatbot() {
     }
   };
 
+  // Auto-send a seeded message once (when opened from the workout ask bar)
+  const seededRef = useRef(false);
+  useEffect(() => {
+    const seed = initialMessage?.trim();
+    if (seed && !seededRef.current) {
+      seededRef.current = true;
+      sendMessage(seed);
+    }
+  }, [initialMessage]);
+
   const renderMessage = ({ item }: { item: Message }) => {
     // Debug: log what we're rendering
     console.log('Rendering message:', item.id, 'isUser:', item.isUser, 'text length:', item.text?.length);
@@ -792,20 +820,16 @@ export default function Chatbot() {
   return (
     <>
       <View style={styles.container}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={0}
-        >
+        <View style={{ flex: 1 }}>
           {/* Header */}
           <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.headerButton}
-              onPress={() => navigation.navigate("nutrition")}
+              onPress={() => (onRequestClose ? onRequestClose() : navigation.navigate("nutrition"))}
               activeOpacity={0.7}
             >
               <BlurView intensity={40} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} blurReductionFactor={Platform.OS === 'android' ? 1 : undefined} style={styles.glassButtonBlur}>
-                <MaterialCommunityIcons name="arrow-left" size={24} color="#8E8E93" />
+                <MaterialCommunityIcons name={onRequestClose ? "chevron-down" : "arrow-left"} size={24} color="#8E8E93" />
               </BlurView>
             </TouchableOpacity>
             
@@ -866,10 +890,15 @@ export default function Chatbot() {
               styles.messagesList,
               {
                 paddingTop: insets.top + 84,
-                paddingBottom: insets.bottom + 96,
+                paddingBottom: insets.bottom + 96 + (Platform.OS === "ios" ? keyboardHeight : 0),
               },
             ]}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+            onScrollEndDrag={
+              onRequestClose
+                ? (e) => { if (e.nativeEvent.contentOffset.y <= -70) onRequestClose(); }
+                : undefined
+            }
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
@@ -919,49 +948,63 @@ export default function Chatbot() {
             }
           />
 
-          {/* Input */}
-          <View style={[styles.inputContainerWrapper, { paddingBottom: insets.bottom + 12 }]}>
-            <View style={[styles.inputContainer, keyboardVisible && styles.inputContainerKeyboardOpen]}>
+          {/* Input — mirrors the workout "ask bar" for cohesiveness */}
+          <View
+            style={[
+              styles.inputContainerWrapper,
+              Platform.OS === "ios"
+                ? { bottom: keyboardHeight, paddingBottom: keyboardHeight > 0 ? 10 : insets.bottom + 12 }
+                : { paddingBottom: insets.bottom + 12 },
+            ]}
+          >
+            <View style={styles.askBar}>
               <TouchableOpacity
-                style={styles.cameraButton}
-                onPress={() => router.push("/ScanMeal")}
-                activeOpacity={0.7}
+                style={styles.askAvatar}
+                onPress={() => { onRequestClose?.(); navigation.navigate("profile"); }}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Open profile"
               >
-                  <MaterialCommunityIcons 
-                    name="camera-outline" 
-                    size={24} 
-                    color="#D1D1D6"
-                  />
+                <Image source={PROFILE_AVATAR} style={styles.askAvatarImg} />
               </TouchableOpacity>
 
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Ask me anything..."
-                  placeholderTextColor="#636366"
-                  value={inputText}
-                  onChangeText={setInputText}
-                  multiline={true} // Enable multiline
-                  maxLength={1000}
-                  underlineColorAndroid="transparent"
-                />
+              <TextInput
+                style={styles.askInput}
+                placeholder="Ask me anything…"
+                placeholderTextColor="#8A8A8E"
+                value={inputText}
+                onChangeText={setInputText}
+                maxLength={1000}
+                returnKeyType="send"
+                onSubmitEditing={() => sendMessage()}
+                underlineColorAndroid="transparent"
+              />
 
-                <TouchableOpacity
-                  style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-                  onPress={() => sendMessage()}
-                  disabled={!inputText.trim() || isLoading || ((subscriptionPlan === 'FREE' || subscriptionPlan === 'Free') && dailyMessageCount >= FREE_DAILY_LIMIT)}
-                  activeOpacity={0.8}
-                >
-                  <MaterialCommunityIcons
-                    name={isLoading ? "stop" : "arrow-up"}
-                    size={20}
-                    color="#000000"
-                  />
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.cameraInline}
+                onPress={() => router.push("/ScanMeal")}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Scan a meal"
+              >
+                <MaterialCommunityIcons name="camera-outline" size={22} color="#8A8A8E" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.askSend, !inputText.trim() && !isLoading && styles.askSendDisabled]}
+                onPress={() => sendMessage()}
+                disabled={!inputText.trim() || isLoading || ((subscriptionPlan === 'FREE' || subscriptionPlan === 'Free') && dailyMessageCount >= FREE_DAILY_LIMIT)}
+                activeOpacity={0.85}
+              >
+                <MaterialCommunityIcons
+                  name={isLoading ? "stop" : "arrow-up"}
+                  size={20}
+                  color="#000000"
+                />
+              </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
 
         {/* Saved Messages Modal */}
         <Modal
@@ -1442,6 +1485,58 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   inputContainerKeyboardOpen: {},
+
+  // ── Ask bar (mirrors workout ask bar) ──────────────────────────────────────
+  askBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    maxWidth: 600,
+    alignSelf: 'center',
+    height: 54,
+    paddingLeft: 6,
+    paddingRight: 6,
+    borderRadius: 27,
+    backgroundColor: '#17191B',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+  },
+  askAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    overflow: 'hidden',
+    backgroundColor: '#161618',
+  },
+  askAvatarImg: { width: '100%', height: '100%' },
+  askInput: {
+    flex: 1,
+    minWidth: 0,
+    color: '#FFF',
+    fontFamily: theme.regular,
+    fontSize: 14.5,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
+    outlineStyle: 'none',
+  } as any,
+  cameraInline: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  askSend: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: theme.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  askSendDisabled: {
+    backgroundColor: '#3A3A3C',
+  },
   inputWrapper: {
     flex: 1,
     flexDirection: 'row',

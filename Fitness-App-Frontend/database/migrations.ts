@@ -96,5 +96,18 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 16,
+      steps: [
+        createTable({
+          name: 'saved_routines',
+          columns: [
+            { name: 'user_id', type: 'string', isIndexed: true },
+            { name: 'routine_id', type: 'string', isIndexed: true },
+            { name: 'saved_at', type: 'number', isIndexed: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

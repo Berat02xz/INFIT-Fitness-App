@@ -158,6 +158,35 @@ export const AIEndpoint = {
         }
       };
 
+      let emittedAny = false;
+      const emit = (c: string) => { if (c) { emittedAny = true; onChunk(c); } };
+
+      // Fallback for when the server didn't stream OpenAI-style deltas: pull a plain
+      // answer out of whatever shape came back so the user still sees a reply.
+      const extractPlainAnswer = (raw: string): string => {
+        const text = (raw || '').trim();
+        if (!text) return '';
+        try {
+          const obj = JSON.parse(text);
+          if (typeof obj === 'string') return obj;
+          return obj.answer ?? obj.text ?? obj.content ?? obj.message ?? obj.response ?? '';
+        } catch {}
+        let collected = '';
+        for (const line of text.split('\n')) {
+          const t = line.trim().replace(/^data:\s*/, '');
+          if (!t.startsWith('{')) continue;
+          try {
+            const j = JSON.parse(t);
+            if (typeof j.delta === 'string') collected += j.delta;
+            else if (typeof j.text === 'string') collected += j.text;
+            else if (typeof j.output_text === 'string') collected += j.output_text;
+          } catch {}
+        }
+        if (collected) return collected;
+        if (!text.includes('data:') && !text.startsWith('{')) return text;
+        return '';
+      };
+
       if (Platform.OS !== 'web') {
         // Native implementation using XMLHttpRequest which handles streaming better on RN
         return new Promise((resolve, reject) => {
@@ -166,7 +195,8 @@ export const AIEndpoint = {
           xhr.setRequestHeader('Content-Type', 'application/json');
           xhr.setRequestHeader('Authorization', `Bearer ${token}`);
           xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
-          
+          xhr.timeout = 60000;
+
           let lastIndex = 0;
 
           xhr.onprogress = () => {
@@ -174,11 +204,24 @@ export const AIEndpoint = {
              const response = xhr.responseText;
              const newContent = response.substring(lastIndex);
              lastIndex = response.length;
-             processBuffer(newContent, onChunk);
+             processBuffer(newContent, emit);
           };
 
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
+              // Flush whatever arrived between the last progress event and load
+              const response = xhr.responseText;
+              if (response.length > lastIndex) {
+                processBuffer(response.substring(lastIndex), emit);
+                lastIndex = response.length;
+              }
+              if (buffer.trim()) processBuffer('\n', emit);
+              // Nothing matched as a streamed delta → recover a plain answer
+              if (!emittedAny) {
+                const fallback = extractPlainAnswer(xhr.responseText);
+                if (fallback) onChunk(fallback);
+                else console.warn('[askChatStream] Empty/unparsable response:', xhr.responseText?.slice(0, 300));
+              }
               resolve({ answer: 'Stream completed' });
             } else {
               reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
@@ -189,6 +232,8 @@ export const AIEndpoint = {
             console.error('XHR Error:', e);
             reject(new Error('Network request failed'));
           };
+
+          xhr.ontimeout = () => reject(new Error('Request timed out'));
 
           xhr.send(JSON.stringify({ Question: question }));
         });
@@ -221,17 +266,25 @@ export const AIEndpoint = {
       
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
+      let raw = '';
 
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) {
           console.log('Stream completed');
           break;
         }
 
         const chunk = decoder.decode(value, { stream: true });
-        processBuffer(chunk, onChunk);
+        raw += chunk;
+        processBuffer(chunk, emit);
+      }
+
+      if (buffer.trim()) processBuffer('\n', emit);
+      if (!emittedAny) {
+        const fallback = extractPlainAnswer(raw);
+        if (fallback) onChunk(fallback);
       }
 
       return { answer: 'Stream completed' };

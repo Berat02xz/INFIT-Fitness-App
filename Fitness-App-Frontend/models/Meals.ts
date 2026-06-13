@@ -102,9 +102,15 @@ static async DaySuccesfulCalorieIntake(database: Database, userId: string, date?
   const totalCalories = meals.reduce((acc, m) => acc + m.calories, 0);
   
   // 70% of goal met
-  const lowerBound = caloricIntake * 0.7; 
+  const lowerBound = caloricIntake * 0.7;
   return totalCalories > 0 && totalCalories >= lowerBound;
 }
 
+static async deleteMealById(database: Database, id: string): Promise<void> {
+  await database.write(async () => {
+    const meal = await database.get<Meal>("meals").find(id);
+    await meal.destroyPermanently();
+  });
+}
 
 }

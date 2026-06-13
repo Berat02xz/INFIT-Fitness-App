@@ -1,6 +1,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Image, Platform, Dimensions } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Image, Platform, Dimensions, NativeSyntheticEvent, NativeScrollEvent } from "react-native";
+import { useAskBarScroll } from "@/components/ui/AskBar/AskBarContext";
 import { router, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -39,6 +40,7 @@ const D = {
 
 export default function Profile() {
   const insets = useSafeAreaInsets();
+  const askScroll = useAskBarScroll();
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { isPro } = useProStatus();
@@ -357,9 +359,12 @@ export default function Profile() {
       <ScrollView
         contentContainerStyle={[
           s.scrollContent,
-          { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 100 },
+          { paddingTop: insets.top + 78, paddingBottom: insets.bottom + 100 },
         ]}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => askScroll.onScroll(e.nativeEvent.contentOffset.y)}
+        onScrollEndDrag={(e: NativeSyntheticEvent<NativeScrollEvent>) => askScroll.onScrollEndDrag(e.nativeEvent.contentOffset.y)}
       >
         
         {/* -- Top Bar -- */}
@@ -373,16 +378,12 @@ export default function Profile() {
                 </View>
                 <View style={s.topBarRight}>
                     {/* Streak badge */}
-                    <TouchableOpacity 
-                      style={s.levelBadge}
-                      activeOpacity={0.8}
-                      onPress={() => router.push("/Analytics")}
-                    >
+                    <View style={s.levelBadge}>
                         <View style={s.levelIconWrap}>
                             <Text style={{ fontSize: 12 }}>🔥</Text>
                         </View>
                         <Text style={s.levelText}>{streak} Day{streak !== 1 ? 's' : ''}</Text>
-                    </TouchableOpacity>
+                    </View>
                 </View>
             </View>
         </FadeTranslate>
