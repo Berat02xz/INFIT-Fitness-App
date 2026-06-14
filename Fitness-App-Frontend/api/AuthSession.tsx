@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import { loadStoredToken, removeToken } from "@/api/AxiosInstance";
 import { FetchUserInformationAndStore } from "@/api/UserDataEndpoint";
 import database from "@/database/database";
+import { hydrateExpoGoActivity } from "@/database/expoGoActivityPersistence";
 import { User } from "@/models/User";
 
 type DecodedToken = {
@@ -47,6 +48,7 @@ export async function ensureAuthenticatedSession(): Promise<boolean> {
     }
   }
 
+  await hydrateExpoGoActivity(database, decoded.sub);
   return Boolean(user && user.userId === decoded.sub);
 }
 

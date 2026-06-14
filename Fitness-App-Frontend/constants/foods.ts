@@ -21,6 +21,9 @@ export interface FoodItem {
   tags?: string[];
   /** surfaced in the quick-add row on the nutrition screen */
   featured?: boolean;
+  /** populated only for recently-scanned meals surfaced in the dial */
+  isScanned?: boolean;
+  scannedAt?: number;  // ms timestamp
 }
 
 export const FOODS: FoodItem[] = [

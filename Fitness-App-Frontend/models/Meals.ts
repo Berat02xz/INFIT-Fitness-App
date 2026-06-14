@@ -4,6 +4,7 @@ import database from "@/database/database";
 import UserData from "./DTO/UserDTO";
 import UserDTO from "./DTO/UserDTO";
 import { User } from "./User";
+import { persistActivitySnapshotNow } from "@/database/expoGoActivityPersistence";
 
 export class Meal extends Model {
   static table = "meals";
@@ -21,7 +22,7 @@ export class Meal extends Model {
  
 
 static async createMeal(database: Database, mealData: { userId: string; mealName: string; calories: number; protein: number; carbohydrates: number; fats: number; label: string; createdAt: number; healthScore: number; oneEmoji:string; }): Promise<Meal> {
-  return await database.write(async () => {
+  const meal = await database.write(async () => {
     return await database.get<Meal>("meals").create((meal) => {
       meal.userId = mealData.userId;
       meal.mealName = mealData.mealName;
@@ -35,6 +36,8 @@ static async createMeal(database: Database, mealData: { userId: string; mealName
       meal.oneEmoji = mealData.oneEmoji;
     });
   });
+  await persistActivitySnapshotNow(database, mealData.userId);
+  return meal;
 }
 
 static async getAllMeals(database: Database): Promise<Meal[]> {
@@ -61,6 +64,7 @@ static async deleteMealsForUser(database: Database, userId: string): Promise<voi
     const userMeals = await database.get<Meal>("meals").query(Q.where("user_id", userId)).fetch();
     await Promise.all(userMeals.map((meal) => meal.destroyPermanently()));
   });
+  await persistActivitySnapshotNow(database, userId);
 }
 
 static async DaySumCalories(database: Database, userId?: string, date?: Date): Promise<number> {
@@ -107,18 +111,27 @@ static async DaySuccesfulCalorieIntake(database: Database, userId: string, date?
 }
 
 static async deleteMealById(database: Database, id: string): Promise<void> {
+  let userId = "";
   await database.write(async () => {
     const meal = await database.get<Meal>("meals").find(id);
+    userId = meal.userId;
     await meal.destroyPermanently();
   });
+  if (userId) await persistActivitySnapshotNow(database, userId);
 }
 
-// Most recent scanned meals (label "scan"), de-duped by name, newest first.
+// Most recent scanned meals (label "scan"), de-duped by name, from the past 30
+// days, newest first. 30 days keeps the dial fresh without growing unbounded.
 static async getRecentScannedMeals(database: Database, userId: string, limit = 10): Promise<Meal[]> {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const meals = await database
     .get<Meal>("meals")
     .query(
-      Q.and(Q.where("user_id", userId), Q.where("label", "scan")),
+      Q.and(
+        Q.where("user_id", userId),
+        Q.where("label", "scan"),
+        Q.where("created_at", Q.gte(thirtyDaysAgo))
+      ),
       Q.sortBy("created_at", Q.desc)
     )
     .fetch();

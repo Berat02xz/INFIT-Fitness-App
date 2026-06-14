@@ -16,9 +16,11 @@ type Unit = "metric" | "imperial";
 const PRIMARY = "#AAFB05";
 const ITEM_WIDTH = 14;
 
-// Heights the island should expand to for each editor type.
-export const RULER_EDITOR_HEIGHT = 380;
-export const optionEditorHeight = (count: number) => 96 + count * 58;
+// Heights the island should expand to for each editor type. Rows with a sub-label
+// (e.g. calorie plans) are taller, so callers pass `hasSub` for those.
+export const RULER_EDITOR_HEIGHT = 296;
+export const optionEditorHeight = (count: number, hasSub = false) =>
+  66 + count * (hasSub ? 64 : 50);
 
 // ── ranges (mirroring onboarding) ──
 const W_METRIC = Array.from({ length: 171 }, (_, i) => i + 30); // 30–200 kg
@@ -241,7 +243,7 @@ export function OptionEditor({
   return (
     <View>
       <Title>{title}</Title>
-      <View style={{ gap: 8, marginTop: 10 }}>
+      <View style={st.optList}>
         {options.map((o) => {
           const active = selectedValue === o.value;
           return (
@@ -251,8 +253,8 @@ export function OptionEditor({
               onPress={() => onSelect(o.value)}
               activeOpacity={0.8}
             >
-              <View style={{ flex: 1 }}>
-                <Text style={st.optLabel}>{o.label}</Text>
+              <View style={st.optTextWrap}>
+                <Text style={[st.optLabel, active && st.optLabelActive]} numberOfLines={1}>{o.label}</Text>
                 {o.sub ? <Text style={st.optSub}>{o.sub}</Text> : null}
               </View>
               {o.badge ? (
@@ -260,7 +262,7 @@ export function OptionEditor({
                   <Text style={st.badgeText}>{o.badge}</Text>
                 </View>
               ) : null}
-              {active ? <Ionicons name="checkmark-circle" size={20} color={PRIMARY} /> : null}
+              {active ? <Ionicons name="checkmark-circle" size={18} color={PRIMARY} style={st.optCheck} /> : null}
             </TouchableOpacity>
           );
         })}
@@ -271,55 +273,63 @@ export function OptionEditor({
 
 const st = StyleSheet.create({
   center: { alignItems: "center" },
-  title: { color: "#fff", fontFamily: theme.bold, fontSize: 18, alignSelf: "center", marginBottom: 6 },
+  title: { color: "#fff", fontFamily: theme.bold, fontSize: 15, alignSelf: "center", marginBottom: 4 },
 
   pill: {
     flexDirection: "row",
     alignItems: "baseline",
     backgroundColor: "#1A1B1E",
-    paddingVertical: 8,
-    paddingHorizontal: 24,
+    paddingVertical: 5,
+    paddingHorizontal: 18,
     borderRadius: 30,
-    marginTop: 6,
+    marginTop: 4,
   },
-  pillValue: { color: "#fff", fontFamily: theme.bold, fontSize: 38, letterSpacing: -1 },
-  pillUnit: { color: "#8A8A8E", fontFamily: theme.medium, fontSize: 15, marginLeft: 6 },
+  pillValue: { color: "#fff", fontFamily: theme.bold, fontSize: 30, letterSpacing: -1 },
+  pillUnit: { color: "#8A8A8E", fontFamily: theme.medium, fontSize: 12, marginLeft: 5 },
 
-  pickerWrap: { height: 96, width: "100%", justifyContent: "center", alignItems: "center", marginTop: 8 },
+  pickerWrap: { height: 96, width: "100%", justifyContent: "center", alignItems: "center", marginTop: 6 },
   centerLine: { position: "absolute", width: 3, height: 60, borderRadius: 2, backgroundColor: PRIMARY, zIndex: 1 },
   tickWrap: { width: ITEM_WIDTH, height: 96, justifyContent: "center", alignItems: "center" },
   tick: { width: 2, borderRadius: 1, backgroundColor: "#fff" },
 
-  toggle: { flexDirection: "row", backgroundColor: "#1A1B1E", padding: 4, borderRadius: 30, marginTop: 12 },
-  toggleBtn: { paddingVertical: 9, paddingHorizontal: 22, borderRadius: 24 },
+  toggle: { flexDirection: "row", backgroundColor: "#1A1B1E", padding: 3, borderRadius: 30, marginTop: 10 },
+  toggleBtn: { paddingVertical: 7, paddingHorizontal: 18, borderRadius: 24 },
   toggleBtnActive: { backgroundColor: "#fff" },
-  toggleText: { fontFamily: theme.bold, fontSize: 14, color: "#8A8A8E" },
+  toggleText: { fontFamily: theme.bold, fontSize: 12, color: "#8A8A8E" },
   toggleTextActive: { color: "#000" },
 
   save: {
     backgroundColor: PRIMARY,
-    paddingVertical: 14,
-    borderRadius: 26,
+    paddingVertical: 10,
+    borderRadius: 24,
     alignItems: "center",
     alignSelf: "stretch",
-    marginTop: 14,
+    marginTop: 12,
   },
-  saveText: { color: "#000", fontFamily: theme.bold, fontSize: 15 },
+  saveText: { color: "#000", fontFamily: theme.bold, fontSize: 13 },
 
+  // Push the list below the floating avatar / close-button zone, and keep rows
+  // narrow + centred so they never sit under the avatar (left) or X (right).
+  optList: { gap: 6, marginTop: 16, alignItems: "center" },
   opt: {
+    width: "84%",
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#16181B",
     borderWidth: 1,
     borderColor: "transparent",
-    borderRadius: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
+    borderRadius: 999,
+    paddingVertical: 11,
+    paddingHorizontal: 18,
   },
-  optActive: { borderColor: PRIMARY, backgroundColor: "rgba(170,251,5,0.08)" },
-  optLabel: { color: "#fff", fontFamily: theme.semibold, fontSize: 15 },
-  optSub: { color: "#8A8A8E", fontFamily: theme.regular, fontSize: 12, marginTop: 2 },
-  badge: { backgroundColor: PRIMARY, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10 },
-  badgeText: { color: "#000", fontFamily: theme.bold, fontSize: 11 },
+  optActive: { borderColor: PRIMARY, backgroundColor: "rgba(170,251,5,0.10)" },
+  optTextWrap: { alignItems: "center", flexShrink: 1 },
+  optLabel: { color: "#fff", fontFamily: theme.semibold, fontSize: 13.5, textAlign: "center" },
+  optLabelActive: { color: PRIMARY },
+  optSub: { color: "#8A8A8E", fontFamily: theme.regular, fontSize: 11, marginTop: 2, textAlign: "center" },
+  optCheck: { position: "absolute", right: 14 },
+  badge: { backgroundColor: PRIMARY, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9 },
+  badgeText: { color: "#000", fontFamily: theme.bold, fontSize: 10 },
 });

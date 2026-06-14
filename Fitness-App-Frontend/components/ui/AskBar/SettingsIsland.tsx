@@ -65,5 +65,5 @@ const st = StyleSheet.create({
     justifyContent: "center",
     zIndex: 2,
   },
-  content: { flex: 1, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 18 },
+  content: { flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12 },
 });

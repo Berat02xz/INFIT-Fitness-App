@@ -7,6 +7,7 @@ import { User } from '@/models/User';
 import  UserDTO  from '@/models/DTO/UserDTO';
 import { Meal } from '@/models/Meals';
 import { MealEndpoint } from './MealEndpoint';
+import { clearExpoGoActivity } from '@/database/expoGoActivityPersistence';
 
 export const RegisterUser = async (userData: {
   Name: string;
@@ -324,6 +325,7 @@ export const Login = async (
 export const LogoutUser = async () => {
   try {
     console.log('🚪 Starting logout process...');
+    const currentUser = await User.getUserDetails(database);
     
     // Logout from RevenueCat
     try {
@@ -338,6 +340,9 @@ export const LogoutUser = async () => {
     // Clear local database
     try {
       console.log('💾 Resetting local database...');
+      if (currentUser?.userId) {
+        await clearExpoGoActivity(currentUser.userId);
+      }
       await database.write(async () => {
         await database.unsafeResetDatabase();
       });

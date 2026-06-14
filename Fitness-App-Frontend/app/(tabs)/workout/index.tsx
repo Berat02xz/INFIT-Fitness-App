@@ -18,8 +18,9 @@ import {
   NativeScrollEvent,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
+import PlatformBlur from "@/components/ui/PlatformBlur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GestureDetector } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/constants/theme";
 import FadeTranslate from "@/components/ui/FadeTranslate";
@@ -187,7 +188,7 @@ const RoutineCard = React.memo(function RoutineCard({
           </View>
 
           <View style={s.glassBarWrap}>
-            <BlurView experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : undefined} intensity={Platform.OS === "ios" ? 55 : 35} tint="light" style={s.glassBar}>
+            <PlatformBlur intensity={55} tint="light" androidColor="rgba(40,40,42,0.82)" style={s.glassBar}>
               <View style={s.glassTextCol}>
                 <Text style={s.glassTitle} numberOfLines={1}>{routine.name}</Text>
                 <Text style={s.glassSub} numberOfLines={1}>Routine by {routine.athlete?.name ?? "Invicta"} • {routine.exercises.length} exercises</Text>
@@ -195,7 +196,7 @@ const RoutineCard = React.memo(function RoutineCard({
               <View style={s.arrowCircle}>
                 <Ionicons name="arrow-forward" size={19} color="#000" style={{ transform: [{ rotate: "-45deg" }] }} />
               </View>
-            </BlurView>
+            </PlatformBlur>
           </View>
 
           <SquircleFrame width={CARD_W} height={CARD_H} cornerRadius={CARD_RADIUS} color={D.bg} strokeColor="rgba(255,255,255,0.07)" />
@@ -302,6 +303,7 @@ export default function Workout() {
 
       <LinearGradient colors={["transparent", "rgba(0,0,0,0.38)", "rgba(0,0,0,0.82)"]} locations={[0, 0.55, 1]} style={s.bottomScreenFade} pointerEvents="none" />
 
+      <GestureDetector gesture={askScroll.pullGesture}>
       <ScrollView
         style={s.scroll}
         contentContainerStyle={{ paddingTop: HEADER_H + 8, paddingBottom: insets.bottom + 110 }}
@@ -346,6 +348,7 @@ export default function Workout() {
           )}
         </View>
       </ScrollView>
+      </GestureDetector>
     </View>
   );
 }

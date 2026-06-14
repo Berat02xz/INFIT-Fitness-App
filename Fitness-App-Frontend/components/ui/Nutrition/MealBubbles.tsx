@@ -32,6 +32,8 @@ export type MealBubbleItem = {
   name: string;
   calories: number;
   health: number;
+  isScanned?: boolean;
+  scannedAt?: number;
 };
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
@@ -57,7 +59,7 @@ function restingOffset(index: number, total: number): Offset {
   if (total <= 1) return { x: 0, y: 0 };
   const angle = index * GOLDEN;
   const jitter = ((index * 53) % 19) - 9;
-  const radius = 42 + Math.min(index, 9) * 19 + jitter;
+  const radius = 24 + Math.min(index, 9) * 11 + jitter * 0.5;
   return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
 }
 

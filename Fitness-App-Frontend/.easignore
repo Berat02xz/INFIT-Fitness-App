@@ -15,6 +15,7 @@
 /Fitness-App-Frontend/web-build/
 /Fitness-App-Frontend/metro-cache/
 /Fitness-App-Frontend/.expo-ios-export-check/
+/Fitness-App-Frontend/.expo-export-test/
 
 # Local Android/Gradle/CMake output.
 /Fitness-App-Frontend/android/.gradle/

@@ -1,7 +1,16 @@
 import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, StyleSheet, StatusBar, Dimensions } from "react-native";
+import {
+  View,
+  StyleSheet,
+  StatusBar,
+  Dimensions,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollView,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GestureDetector } from "react-native-gesture-handler";
 
 import { GetUserDetails } from "@/api/UserDataEndpoint";
 import { Meal } from "@/models/Meals";
@@ -9,7 +18,7 @@ import database from "@/database/database";
 import { getUserIdFromToken } from "@/api/TokenDecoder";
 import UserDTO from "@/models/DTO/UserDTO";
 import { FOODS, type FoodItem } from "@/constants/foods";
-import { useMealsVersion } from "@/components/ui/AskBar/AskBarContext";
+import { useAskBarScroll, useMealsVersion } from "@/components/ui/AskBar/AskBarContext";
 import { haptics } from "@/utils/haptics";
 
 import ConstellationBackground from "@/components/ui/Nutrition/ConstellationBackground";
@@ -25,8 +34,6 @@ const C = {
   bg: "#08090B",
 };
 
-const DEFAULT_MACRO_SPLIT = { protein: 0.3, carbs: 0.4, fats: 0.3 };
-
 // Curated subset for the bottom emoji dial: featured meals first, then a spread
 // of varied single-emoji extras to round out the wheel.
 const DIAL_FOODS: FoodItem[] = (() => {
@@ -40,35 +47,10 @@ const DIAL_FOODS: FoodItem[] = (() => {
 
 type Totals = { calories: number; protein: number; carbs: number; fats: number };
 
-// ─── Motivational copy, chosen from the day's data ───────────────────────────
-function pickMotivation(
-  totals: Totals,
-  target: number,
-  mealCount: number,
-  proteinTarget: number
-): string {
-  if (mealCount === 0) return "Log your first meal 🍽️";
-
-  const left = target - totals.calories;
-  const ratio = target > 0 ? totals.calories / target : 0;
-
-  if (left < 0) return "Over your target — go easy 🌙";
-  if (ratio >= 0.9) return "You're right on track today ✨";
-
-  const proteinCal = totals.protein * 4;
-  const proteinShare = totals.calories > 0 ? proteinCal / totals.calories : 0;
-  if (totals.protein >= proteinTarget * 0.6 && proteinShare >= 0.22 && ratio >= 0.4) {
-    return "Top 20% of healthy eaters today 🥇";
-  }
-  if (totals.protein >= proteinTarget * 0.5) {
-    return "Great protein — keep it going 💪";
-  }
-  return `You still have ${Math.round(left).toLocaleString()} kcal to eat`;
-}
-
 export default function NutritionScreen() {
   const insets = useSafeAreaInsets();
   const mealsVersion = useMealsVersion();
+  const askScroll = useAskBarScroll();
 
   const [userData, setUserData] = useState<UserDTO | null>(null);
   const [todayMeals, setTodayMeals] = useState<Meal[]>([]);
@@ -172,16 +154,7 @@ export default function NutritionScreen() {
   const isOver = totals.calories > targetCalories;
   const consumed = Math.round(totals.calories);
   const progress = targetCalories > 0 ? totals.calories / targetCalories : 0;
-  // "On track" lights the single green accent in the header: meaningfully into
-  // the day's target but not yet over it.
   const onTrack = !isOver && progress >= 0.7;
-
-  const proteinTarget = Math.round((targetCalories * DEFAULT_MACRO_SPLIT.protein) / 4);
-
-  const motivation = useMemo(
-    () => pickMotivation(totals, targetCalories, todayMeals.length, proteinTarget),
-    [totals.calories, totals.protein, targetCalories, todayMeals.length, proteinTarget]
-  );
 
   const bubbleMeals: MealBubbleItem[] = useMemo(
     () =>
@@ -191,6 +164,8 @@ export default function NutritionScreen() {
         name: m.mealName,
         calories: m.calories,
         health: m.healthScore,
+        isScanned: m.label === "scan",
+        scannedAt: m.label === "scan" ? m.createdAt : undefined,
       })),
     [todayMeals]
   );
@@ -206,14 +181,15 @@ export default function NutritionScreen() {
       carbs: m.carbohydrates,
       fats: m.fats,
       health: m.healthScore,
+      isScanned: true,
+      scannedAt: m.createdAt,
     }));
     return [...recents, ...DIAL_FOODS];
   }, [recentScanned]);
 
   // ── Layout geometry ──
-  // Lift the dial above the floating tab bar (dock height 72 + its bottom offset)
-  // so its emoji buttons are no longer hidden behind the navigation bar.
-  const dialBottom = Math.max(insets.bottom, 12) + 10 + 72 + 8;
+  // Lift the dial above the floating tab bar (dock height 72 + its bottom offset).
+  const dialBottom = Math.max(insets.bottom, 12) + 58;
   // Cluster + ring sit centered in the open band between the stat header and
   // the dial. The left-aligned header is ~150px tall under its top padding.
   const headerBottom = insets.top + 78 + 150;
@@ -229,6 +205,25 @@ export default function NutritionScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
+      <GestureDetector gesture={askScroll.pullGesture}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          alwaysBounceVertical
+          bounces
+          directionalLockEnabled
+          nestedScrollEnabled
+          overScrollMode="always"
+          scrollEventThrottle={16}
+          onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) =>
+            askScroll.onScroll(e.nativeEvent.contentOffset.y)
+          }
+          onScrollEndDrag={(e: NativeSyntheticEvent<NativeScrollEvent>) =>
+            askScroll.onScrollEndDrag(e.nativeEvent.contentOffset.y)
+          }
+        >
+          <View style={styles.canvas}>
       {/* Reference-matched background: square grid + dots + diffused glow */}
       <ConstellationBackground />
 
@@ -250,7 +245,6 @@ export default function NutritionScreen() {
           protein={totals.protein}
           carbs={totals.carbs}
           fats={totals.fats}
-          motivation={motivation}
           days={monthTotals}
           todayIndex={monthTodayIndex}
         />
@@ -272,6 +266,9 @@ export default function NutritionScreen() {
         onPreview={(m) => { setSelectedMeal(m); setSelectedAuto(false); }}
         onPreviewClose={() => setSelectedMeal(null)}
       />
+          </View>
+        </ScrollView>
+      </GestureDetector>
 
       {/* Tap a logged emoji → blurred detail (name · kcal · health) */}
       {selectedMeal && (
@@ -283,6 +280,9 @@ export default function NutritionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+  scroll: { flex: 1 },
+  scrollContent: { minHeight: SCREEN_H },
+  canvas: { height: SCREEN_H, backgroundColor: C.bg },
   topWrap: { alignItems: "flex-start", paddingHorizontal: 24 },
   dialWrap: { position: "absolute", left: 0, right: 0, alignItems: "center" },
 });

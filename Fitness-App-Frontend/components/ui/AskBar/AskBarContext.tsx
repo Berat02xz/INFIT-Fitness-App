@@ -1,4 +1,9 @@
 import React, { createContext, useContext, useRef, useState, useCallback, useMemo } from "react";
+import { Animated, Platform } from "react-native";
+import { Gesture } from "react-native-gesture-handler";
+
+// Distance the user must pull down (overscroll) to open the chatbot.
+const PULL_TO_CHAT = 130;
 
 // The shared ask-bar lives at the tab-navigation layer. Screens report their
 // scroll so the bar can grow on overscroll / open chat; the bar registers the
@@ -12,6 +17,7 @@ import React, { createContext, useContext, useRef, useState, useCallback, useMem
 type ScrollHandlers = {
   onScroll?: (y: number) => void;
   onEndDrag?: (y: number) => void;
+  onPull?: () => void;
 };
 
 type IslandState = { node: React.ReactNode; height: number } | null;
@@ -25,6 +31,7 @@ type AskBarCtx = {
   closeIsland: () => void;
   avatarPulse: number;
   pulseAvatar: () => void;
+  chatTransition: Animated.Value;
 };
 
 const Ctx = createContext<AskBarCtx | null>(null);
@@ -43,6 +50,7 @@ export function AskBarProvider({ children }: { children: React.ReactNode }) {
 
   const [avatarPulse, setAvatarPulse] = useState(0);
   const pulseAvatar = useCallback(() => setAvatarPulse((v) => v + 1), []);
+  const chatTransition = useRef(new Animated.Value(0)).current;
 
   const value = useMemo(
     () => ({
@@ -54,8 +62,9 @@ export function AskBarProvider({ children }: { children: React.ReactNode }) {
       closeIsland,
       avatarPulse,
       pulseAvatar,
+      chatTransition,
     }),
-    [mealsVersion, bumpMeals, island, openIsland, closeIsland, avatarPulse, pulseAvatar]
+    [mealsVersion, bumpMeals, island, openIsland, closeIsland, avatarPulse, pulseAvatar, chatTransition]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -66,13 +75,53 @@ function useCtx() {
   return c;
 }
 
-/** Screens: report scroll position so the bar can react. */
+/** Screens: report scroll position so the bar can react.
+ *
+ * iOS reports a negative `contentOffset.y` while bouncing past the top, which
+ * the bar uses to grow + open chat. Android ScrollViews clamp the offset to 0,
+ * so the same overscroll never registers. To make pull-to-chat work on Android
+ * we additionally expose `pullGesture`: a Pan that runs simultaneously with the
+ * native scroll and fires `onPull` once the user drags down past the threshold
+ * while already at the top. */
 export function useAskBarScroll() {
   const { scrollRef } = useCtx();
-  return {
-    onScroll: (y: number) => scrollRef.current.onScroll?.(y),
-    onScrollEndDrag: (y: number) => scrollRef.current.onEndDrag?.(y),
-  };
+  const atTopRef = useRef(true);
+  const firedRef = useRef(false);
+
+  const onScroll = useCallback((y: number) => {
+    atTopRef.current = y <= 1;
+    scrollRef.current.onScroll?.(y);
+  }, [scrollRef]);
+
+  const onScrollEndDrag = useCallback((y: number) => {
+    scrollRef.current.onEndDrag?.(y);
+  }, [scrollRef]);
+
+  // Android-only overscroll substitute. It drives the same live bar stretch as
+  // iOS bounce, then opens chat after the shared threshold.
+  const pullGesture = useMemo(() => {
+    const native = Gesture.Native();
+    const pan = Gesture.Pan()
+      .enabled(Platform.OS === "android")
+      .activeOffsetY(10)
+      .failOffsetX([-28, 28])
+      .runOnJS(true)
+      .onUpdate((e) => {
+        if (!atTopRef.current || e.translationY <= 0) return;
+        scrollRef.current.onScroll?.(-Math.min(e.translationY, 170));
+        if (!firedRef.current && e.translationY > PULL_TO_CHAT) {
+          firedRef.current = true;
+          scrollRef.current.onPull?.();
+        }
+      })
+      .onFinalize(() => {
+        firedRef.current = false;
+        scrollRef.current.onScroll?.(0);
+      });
+    return Gesture.Simultaneous(native, pan);
+  }, [scrollRef]);
+
+  return { onScroll, onScrollEndDrag, pullGesture };
 }
 
 /** The AskBar: register the scroll handlers it wants screens to drive. */
@@ -106,4 +155,9 @@ export function useIslandState() {
 }
 export function useAvatarPulse() {
   return useCtx().avatarPulse;
+}
+
+/** Shared transition used by the askbar chat overlay and the active tab surface. */
+export function useChatTransition() {
+  return useCtx().chatTransition;
 }

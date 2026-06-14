@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
@@ -91,12 +91,19 @@ export default function ContributionDots({
   target: number;
 }): React.JSX.Element | null {
   const progress = useSharedValue(0);
+  // Re-run the sweep only when a day's COLOUR bucket actually changes (grey →
+  // green → red), not on every calorie tweak. A signature of the buckets lets us
+  // skip re-animating when logging a meal that doesn't move any day's status.
+  const signatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (days.length === 0) return;
+    const signature = days.map((cal) => colorFor(cal, target)).join("|");
+    if (signature === signatureRef.current) return; // no visible change → don't replay
+    signatureRef.current = signature;
     progress.value = 0;
     progress.value = withTiming(1, { duration: 1000, easing: Easing.out(Easing.cubic) });
-  }, [days, progress]);
+  }, [days, target, progress]);
 
   if (days.length === 0) return null;
 

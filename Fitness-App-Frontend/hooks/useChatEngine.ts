@@ -2,6 +2,8 @@ import { useEffect, useReducer, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GetUserDetails } from "@/api/UserDataEndpoint";
 import { Meal } from "@/models/Meals";
+import { WorkoutLog } from "@/models/WorkoutLog";
+import { Q } from "@nozbe/watermelondb";
 import database from "@/database/database";
 import { getUserIdFromToken } from "@/api/TokenDecoder";
 import { AIEndpoint } from "@/api/AIEndpoint";
@@ -88,6 +90,74 @@ async function getContextualData(cat: "nutrition" | "fitness" | "general") {
   }
 }
 
+// ─── Manual context builders (used by Chatbot screen's context selector) ──────
+
+export async function buildUserContext(): Promise<string> {
+  try {
+    const user = await GetUserDetails();
+    if (!user) return "";
+    return [
+      `Name: ${user.name}`,
+      `Age: ${user.age}`,
+      `Gender: ${user.gender}`,
+      `Weight: ${user.weight}${user.unit === "metric" ? "kg" : "lbs"}`,
+      `Height: ${user.height}${user.unit === "metric" ? "cm" : "in"}`,
+      `BMI: ${Number(user.bmi || 0).toFixed(1)}`,
+      `Goal: ${user.goal}`,
+      `Calorie Target: ${user.caloricIntake} kcal/day`,
+      `Fitness Level: ${user.fitnessLevel}`,
+      `Equipment: ${user.equipmentAccess}`,
+      `Activity Level: ${user.activityLevel}`,
+    ].join(", ");
+  } catch { return ""; }
+}
+
+export async function buildWorkoutContext(): Promise<string> {
+  try {
+    const userId = await getUserIdFromToken();
+    if (!userId) return "";
+    const endMs = Date.now();
+    const startMs = endMs - 30 * 24 * 60 * 60 * 1000;
+    const logs = await WorkoutLog.logsInRange(database, userId, startMs, endMs);
+    const recent = logs.sort((a, b) => b.completedAt - a.completedAt).slice(0, 5);
+    if (recent.length === 0) return "No workouts logged in the past 30 days.";
+    const lines = recent.map((l) => {
+      const date = new Date(l.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return `${l.routineName} on ${date} — ${Math.round(l.durationSeconds / 60)}min, ${l.caloriesBurned} kcal burned`;
+    });
+    return `Recent Workouts:\n${lines.join("\n")}`;
+  } catch { return ""; }
+}
+
+export async function buildNutritionContext(): Promise<string> {
+  try {
+    const userId = await getUserIdFromToken();
+    if (!userId) return "";
+    const lines: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const label = i === 0 ? "Today" : i === 1 ? "Yesterday" : "2 days ago";
+      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const endMs   = startMs + 24 * 60 * 60 * 1000;
+      const meals   = await database
+        .get<Meal>("meals")
+        .query(Q.and(Q.where("user_id", userId), Q.where("created_at", Q.between(startMs, endMs))))
+        .fetch();
+      if (meals.length > 0) {
+        const cal  = Math.round(meals.reduce((s, m) => s + m.calories, 0));
+        const prot = Math.round(meals.reduce((s, m) => s + m.protein, 0));
+        const carb = Math.round(meals.reduce((s, m) => s + m.carbohydrates, 0));
+        const fat  = Math.round(meals.reduce((s, m) => s + m.fats, 0));
+        lines.push(`${label}: ${cal} kcal — P:${prot}g C:${carb}g F:${fat}g (${meals.length} meal${meals.length > 1 ? "s" : ""})`);
+      } else {
+        lines.push(`${label}: no meals logged`);
+      }
+    }
+    return `Nutrition (last 3 days):\n${lines.join("\n")}`;
+  } catch { return ""; }
+}
+
 // ─── Store actions (can be called from anywhere — no hook context needed) ──────
 
 export async function loadChatUserData() {
@@ -162,6 +232,9 @@ export async function sendChatMessage(
   text: string,
   onChunk?: (chunk: string, fullSoFar: string) => void,
   onPaywall?: () => void,
+  /** When provided, skip keyword auto-detection and use this as the context block.
+   *  Pass an empty string to explicitly send with no context. */
+  explicitContext?: string,
 ): Promise<string | null> {
   if (!text.trim() || _isLoading) return null;
   haptics.light();
@@ -190,11 +263,16 @@ export async function sendChatMessage(
   }
 
   try {
-    const cat = detectCategory(text);
-    const ctx = await getContextualData(cat);
-    const question = ctx
-      ? `${text}\n\nUser Context:\n${JSON.stringify(ctx, null, 2)}`
-      : text;
+    let question: string;
+    if (explicitContext !== undefined) {
+      // Manual context mode (Chatbot screen) — use provided string, skip keyword detection.
+      question = explicitContext ? `${text}\n\nContext:\n${explicitContext}` : text;
+    } else {
+      // Auto-detect mode (ChatIsland quick-ask) — detect category and fetch data.
+      const cat = detectCategory(text);
+      const ctx = await getContextualData(cat);
+      question  = ctx ? `${text}\n\nUser Context:\n${JSON.stringify(ctx, null, 2)}` : text;
+    }
 
     const aiId = (Date.now() + 1).toString();
     const aiMsg: ChatMessage = { id: aiId, text: "", isUser: false, timestamp: new Date() };
@@ -242,8 +320,8 @@ export function useChatEngine() {
   }, [rerender]);
 
   const send = useCallback(
-    (text: string, onChunk?: (c: string, f: string) => void, onPaywall?: () => void) =>
-      sendChatMessage(text, onChunk, onPaywall),
+    (text: string, onChunk?: (c: string, f: string) => void, onPaywall?: () => void, explicitContext?: string) =>
+      sendChatMessage(text, onChunk, onPaywall, explicitContext),
     [],
   );
 

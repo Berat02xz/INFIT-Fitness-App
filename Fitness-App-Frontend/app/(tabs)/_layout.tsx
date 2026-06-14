@@ -1,6 +1,7 @@
 import React from "react";
 import {
   ActivityIndicator,
+  Animated,
   View,
   useWindowDimensions,
   StyleSheet,
@@ -13,7 +14,7 @@ import ProfileScreen from "./profile/index";
 import { TabBar } from "@/components/ui/TabBarUi/TabBar";
 import { TabBarVisibilityProvider } from "@/components/ui/TabBarUi/TabBarVisibility";
 import AskBar from "@/components/ui/AskBar/AskBar";
-import { AskBarProvider } from "@/components/ui/AskBar/AskBarContext";
+import { AskBarProvider, useChatTransition } from "@/components/ui/AskBar/AskBarContext";
 import { theme } from "@/constants/theme";
 import { ensureAuthenticatedSession } from "@/api/AuthSession";
 import { router } from "expo-router";
@@ -23,6 +24,29 @@ const Tab = createBottomTabNavigator();
 // Persists across remounts so the correct tab is restored when
 // navigating back from a (screens) route.
 let lastActiveTab = "workout";
+
+function TabSurface({ children }: { children: React.ReactNode }) {
+  const { height } = useWindowDimensions();
+  const chatTransition = useChatTransition();
+  const translateY = chatTransition.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, Math.min(height * 0.32, 280)],
+  });
+  const scale = chatTransition.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.985],
+  });
+  const opacity = chatTransition.interpolate({
+    inputRange: [0, 0.7, 1],
+    outputRange: [1, 0.72, 0.42],
+  });
+
+  return (
+    <Animated.View style={[styles.tabSurface, { opacity, transform: [{ translateY }, { scale }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
 
 export default function AppLayout() {
   const { width } = useWindowDimensions();
@@ -63,6 +87,7 @@ export default function AppLayout() {
     <TabBarVisibilityProvider>
     <AskBarProvider>
     <View style={{ flex: 1, flexDirection: isLargeScreen ? "row" : "column", backgroundColor: theme.backgroundColor }}>
+      <TabSurface>
       <Tab.Navigator
         initialRouteName={lastActiveTab}
         tabBar={props =>
@@ -102,6 +127,7 @@ export default function AppLayout() {
           options={{ tabBarLabel: "Profile" }}
         />
       </Tab.Navigator>
+      </TabSurface>
 
       {!isLargeScreen && <AskBar activeTab={activeTab} />}
     </View>
@@ -112,6 +138,7 @@ export default function AppLayout() {
 }
 
 const styles = StyleSheet.create({
+  tabSurface: { flex: 1 },
   loadingContainer: {
     flex: 1,
     alignItems: "center",

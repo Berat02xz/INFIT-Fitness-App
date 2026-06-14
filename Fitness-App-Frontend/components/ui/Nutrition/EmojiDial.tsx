@@ -4,6 +4,7 @@ import { haptics } from "@/utils/haptics";
 import FoodEmoji from "./FoodEmoji";
 import React, { useCallback, useEffect, useState } from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -33,7 +34,7 @@ const { width: SCREEN_W } = Dimensions.get("window");
 const WHEEL_R = SCREEN_W * 1.55;
 // Angular gap between adjacent emojis (radians from the wheel center). Smaller
 // → emojis sit closer along the arc.
-const STEP = 0.17;
+const STEP = 0.12;
 // How many items to render on each side of the focused one. Beyond this the
 // emoji has curved too far down/away to matter — keeps the DOM light.
 const VISIBLE_SIDE = 5;
@@ -44,7 +45,7 @@ const FOCUS_EMOJI = 42; // single emoji at focus
 
 // ── Component layout ──
 const ARC_AREA_H = 116; // vertical band the arc of emojis occupies
-const CAPTION_H = 30;
+const CAPTION_H = 46;  // taller to accommodate scan pill + name row
 export const EMOJI_DIAL_HEIGHT = ARC_AREA_H + CAPTION_H;
 
 // Where top-dead-center of the arc sits vertically inside the arc band.
@@ -137,11 +138,11 @@ export default function EmojiDial({
   const lastIndex = Math.max(foods.length - 1, 0);
 
   // Continuous rotation in item units; integer-rounded → focused index. Start at
-  // item 1 so there's always at least one item to the left of the focused one.
-  const rotation = useSharedValue(1);
+  // item 2 so there are always items on both sides of the focused one.
+  const rotation = useSharedValue(2);
   const start = useSharedValue(0);
 
-  const [selectedIndex, setSelectedIndex] = useState(1);
+  const [selectedIndex, setSelectedIndex] = useState(2);
 
   // React-side updates as the focused item changes (caption + haptics + cb).
   const onFocusChange = useCallback(
@@ -221,11 +222,28 @@ export default function EmojiDial({
       </GestureDetector>
 
       {selected ? (
-        <Text style={styles.caption} numberOfLines={1} allowFontScaling={false}>
-          {selected.name}
-          <Text style={styles.captionDot}>{"  ·  "}</Text>
-          <Text style={styles.captionKcal}>{selected.calories} kcal</Text>
-        </Text>
+        <View style={styles.captionWrap}>
+          {selected.isScanned && selected.scannedAt ? (
+            <View style={styles.scanPill}>
+              <Ionicons name="scan-outline" size={10} color="#AAFB05" />
+              <Text style={styles.scanPillText}>
+                Scanned {new Date(selected.scannedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.caption}>
+            <Text
+              style={styles.captionName}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              allowFontScaling={false}
+            >
+              {selected.name}
+            </Text>
+            <Text style={styles.captionDot} allowFontScaling={false}>{"  ·  "}</Text>
+            <Text style={styles.captionKcal} allowFontScaling={false}>{selected.calories} kcal</Text>
+          </View>
+        </View>
       ) : null}
     </View>
   );
@@ -258,20 +276,58 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  captionWrap: {
+    position: "relative",
+    width: SCREEN_W,
+    height: CAPTION_H,
+    alignItems: "center",
+    marginTop: -20,
+  },
   caption: {
+    position: "absolute",
+    top: 0,
+    maxWidth: SCREEN_W - 84,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  captionName: {
+    flexShrink: 1,
+    minWidth: 0,
     fontSize: 14,
     color: C.caption,
     fontFamily: theme.semibold,
-    marginTop: 8,
-    textAlign: "center",
-    paddingHorizontal: 16,
   },
   captionDot: {
+    flexShrink: 0,
+    fontSize: 14,
     color: C.captionDot,
     fontFamily: theme.semibold,
   },
   captionKcal: {
+    flexShrink: 0,
+    fontSize: 14,
     color: C.captionKcal,
     fontFamily: theme.bold,
+  },
+  scanPill: {
+    position: "absolute",
+    top: -25,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(170,251,5,0.10)",
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: "rgba(170,251,5,0.22)",
+  },
+  scanPillText: {
+    fontSize: 10,
+    fontFamily: theme.medium,
+    color: "#AAFB05",
+    letterSpacing: 0.2,
   },
 });

@@ -5,14 +5,26 @@ import { NativeModules } from 'react-native'
 import { schema } from './schema'
 import { migrations } from './migrations'
 
-const isExpoGo = Constants.appOwnership === 'expo'
-const hasWatermelonNativeBridge = Boolean(
+export const isExpoGo = Constants.appOwnership === 'expo'
+export const hasWatermelonNativeBridge = Boolean(
   NativeModules.WMDatabaseBridge || NativeModules.WMDatabaseJSIBridge
 )
+export const usesLokiFallback = isExpoGo || !hasWatermelonNativeBridge
+export const databaseRuntime = {
+  appOwnership: Constants.appOwnership ?? 'none',
+  executionEnvironment: Constants.executionEnvironment ?? 'unknown',
+  adapter: usesLokiFallback ? 'LokiJS (memory)' : 'SQLite',
+  hasWatermelonNativeBridge,
+  persistenceBridgeEnabled: usesLokiFallback,
+}
 
 const createAdapter = () => {
-  if (isExpoGo || !hasWatermelonNativeBridge) {
-    if (!isExpoGo) {
+  if (usesLokiFallback) {
+    if (isExpoGo) {
+      console.warn(
+        '[database] Expo Go uses an in-memory WatermelonDB fallback with an AsyncStorage activity snapshot. Development builds use native SQLite.'
+      )
+    } else {
       console.warn(
         '[database] WatermelonDB native bridge is unavailable; using LokiJS fallback. Rebuild the dev client to use native SQLite.'
       )
@@ -23,8 +35,8 @@ const createAdapter = () => {
       migrations,
       useWebWorker: false,
       useIncrementalIndexedDB: false,
-      onSetUpError: _error => {
-        adapter.unsafeResetDatabase(() => { })
+      onSetUpError: error => {
+        console.error('[database] WatermelonDB setup failed. Local data was preserved.', error)
       },
     })
   }
@@ -33,10 +45,8 @@ const createAdapter = () => {
     schema,
     migrations,
     jsi: true,
-    onSetUpError: _error => {
-      // Migration failed (e.g. DB existed before migrations were introduced).
-      // Reset the database so it is recreated from the current schema.
-      adapter.unsafeResetDatabase(() => { })
+    onSetUpError: error => {
+      console.error('[database] WatermelonDB setup failed. Local data was preserved.', error)
     },
   })
 }

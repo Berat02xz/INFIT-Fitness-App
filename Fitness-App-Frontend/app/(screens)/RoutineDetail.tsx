@@ -269,15 +269,21 @@ export default function RoutineDetail() {
               accessibilityLabel="Go back"
               style={({ pressed }) => [s.iconHit, pressed && s.pressed]}
             >
-              <BlurView
-                blurTarget={heroBlurTarget}
-                blurMethod="dimezisBlurViewSdk31Plus"
-                intensity={36}
-                tint="systemUltraThinMaterialDark"
-                style={s.iconButton}
-              >
-                <Ionicons name="chevron-back" size={23} color={C.text} />
-              </BlurView>
+              {Platform.OS === "android" ? (
+                <View style={[s.iconButton, { backgroundColor: "rgba(30,30,32,0.9)" }]}>
+                  <Ionicons name="chevron-back" size={23} color={C.text} />
+                </View>
+              ) : (
+                <BlurView
+                  blurTarget={heroBlurTarget}
+                  blurMethod="dimezisBlurViewSdk31Plus"
+                  intensity={36}
+                  tint="systemUltraThinMaterialDark"
+                  style={s.iconButton}
+                >
+                  <Ionicons name="chevron-back" size={23} color={C.text} />
+                </BlurView>
+              )}
             </Pressable>
 
             <Text style={s.headerTitle}>Details</Text>
@@ -288,15 +294,21 @@ export default function RoutineDetail() {
               accessibilityLabel="Share routine"
               style={({ pressed }) => [s.iconHit, pressed && s.pressed]}
             >
-              <BlurView
-                blurTarget={heroBlurTarget}
-                blurMethod="dimezisBlurViewSdk31Plus"
-                intensity={36}
-                tint="systemUltraThinMaterialDark"
-                style={s.iconButton}
-              >
-                <Ionicons name="share-outline" size={20} color={C.text} />
-              </BlurView>
+              {Platform.OS === "android" ? (
+                <View style={[s.iconButton, { backgroundColor: "rgba(30,30,32,0.9)" }]}>
+                  <Ionicons name="share-outline" size={20} color={C.text} />
+                </View>
+              ) : (
+                <BlurView
+                  blurTarget={heroBlurTarget}
+                  blurMethod="dimezisBlurViewSdk31Plus"
+                  intensity={36}
+                  tint="systemUltraThinMaterialDark"
+                  style={s.iconButton}
+                >
+                  <Ionicons name="share-outline" size={20} color={C.text} />
+                </BlurView>
+              )}
             </Pressable>
           </View>
         </View>
@@ -397,18 +409,23 @@ export default function RoutineDetail() {
           accessibilityLabel={saved ? "Remove from saved" : "Save routine"}
           style={({ pressed }) => [s.saveHit, pressed && s.pressed]}
         >
-          <BlurView
-            experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : undefined}
-            intensity={Platform.OS === "ios" ? 55 : 35}
-            tint="light"
-            style={s.saveButton}
-          >
-            <Ionicons
-              name={saved ? "bookmark" : "bookmark-outline"}
-              size={23}
-              color={saved ? C.primary : "#fff"}
-            />
-          </BlurView>
+          {Platform.OS === "android" ? (
+            <View style={[s.saveButton, { backgroundColor: "rgba(70,70,72,0.92)" }]}>
+              <Ionicons
+                name={saved ? "bookmark" : "bookmark-outline"}
+                size={23}
+                color={saved ? C.primary : "#fff"}
+              />
+            </View>
+          ) : (
+            <BlurView intensity={55} tint="light" style={s.saveButton}>
+              <Ionicons
+                name={saved ? "bookmark" : "bookmark-outline"}
+                size={23}
+                color={saved ? C.primary : "#fff"}
+              />
+            </BlurView>
+          )}
         </Pressable>
 
         <Pressable

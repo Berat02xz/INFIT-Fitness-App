@@ -18,6 +18,7 @@ metro-cache/
 
 # Expo build artifacts
 dist/
+.expo-export-test/
 .expo-ios-export-check/
 ios/build/
 android/build/

@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import Svg, { Circle } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
+import PlatformBlur from "@/components/ui/PlatformBlur";
 import ConfettiCannon from "react-native-confetti-cannon";
 import { ROUTINES } from "../../constants/workoutRoutines";
 import { ExerciseApi, type ExerciseInfo } from "../../api/ExerciseApi";
@@ -26,6 +26,7 @@ import { WorkoutLog } from "../../models/WorkoutLog";
 import { User } from "../../models/User";
 import { getUserIdFromToken } from "../../api/TokenDecoder";
 import database from "../../database/database";
+import { persistActivitySnapshotNow } from "../../database/expoGoActivityPersistence";
 
 const SOCIAL_PROOF_MESSAGES = [
   "169 people are working out right now",
@@ -511,9 +512,9 @@ export default function WorkoutPlayer() {
       const totalCalories = exercises.reduce(
         (sum, ex) => sum + (ex.expectedCalories ?? 0) * ex.sets, 0
       );
-      getUserIdFromToken().then((userId) => {
+      getUserIdFromToken().then(async (userId) => {
         if (userId && routine) {
-          database.write(() =>
+          await database.write(() =>
             WorkoutLog.logWorkout(database, {
               userId,
               routineId:       routine.id,
@@ -521,9 +522,12 @@ export default function WorkoutPlayer() {
               durationSeconds: totalElapsed,
               caloriesBurned:  totalCalories,
             })
-          ).catch(() => {});
+          );
+          await persistActivitySnapshotNow(database, userId);
         }
-      }).catch(() => {});
+      }).catch((error) => {
+        console.error("[workout] Failed to save completed workout", error);
+      });
       return;
     }
 
@@ -654,12 +658,12 @@ export default function WorkoutPlayer() {
         {/* HYPE OVERLAY */}
         {showHypeOverlay && (
           <Animated.View style={[StyleSheet.absoluteFill, { top: -insets.top, bottom: -insets.bottom, zIndex: 9999, opacity: hypeOpacity }]}>
-            <BlurView intensity={120} experimentalBlurMethod="dimezisBlurView" tint="dark" style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
+            <PlatformBlur intensity={120} tint="dark" androidColor="rgba(0,0,0,0.92)" style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
               <FadeTranslate order={0} translateYFrom={20}>
                 <Text style={styles.hypeTitle}>Ready to Start?</Text>
                 <Text style={styles.hypeSub}>Let&apos;s get this workout!</Text>
               </FadeTranslate>
-            </BlurView>
+            </PlatformBlur>
           </Animated.View>
         )}
 

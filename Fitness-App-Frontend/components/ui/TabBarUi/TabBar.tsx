@@ -1,7 +1,6 @@
 import {
   View,
   StyleSheet,
-  Platform,
   TouchableOpacity,
 } from "react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
@@ -17,7 +16,7 @@ import Animated, {
   interpolate,
   Extrapolation,
 } from "react-native-reanimated";
-import { BlurView } from "expo-blur";
+import PlatformBlur from "@/components/ui/PlatformBlur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useTabBarVisibility } from "./TabBarVisibility";
@@ -147,10 +146,10 @@ export function TabBar({
           wrapperStyle,
         ]}
       >
-        <BlurView
-          experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : undefined}
-          intensity={Platform.OS === "ios" ? 85 : 55}
-          tint={Platform.OS === "ios" ? "systemChromeMaterialDark" : "dark"}
+        <PlatformBlur
+          intensity={85}
+          tint="systemChromeMaterialDark"
+          androidColor="rgba(10,16,10,0.96)"
           style={[styles.bar, { width: tabBarWidth, height: BAR_HEIGHT }]}
         >
           {/* thin top-edge highlight — the only glass cue needed */}
@@ -200,7 +199,7 @@ export function TabBar({
               </TouchableOpacity>
             );
           })}
-        </BlurView>
+        </PlatformBlur>
       </Animated.View>
     </GestureDetector>
   );

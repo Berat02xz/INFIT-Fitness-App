@@ -1,5 +1,6 @@
 import { Database, Model, Q } from '@nozbe/watermelondb';
 import { field } from '@nozbe/watermelondb/decorators';
+import { persistActivitySnapshotNow } from '@/database/expoGoActivityPersistence';
 
 export class SavedRoutine extends Model {
   static table = 'saved_routines';
@@ -38,6 +39,7 @@ export class SavedRoutine extends Model {
         row.savedAt   = Date.now();
       });
     });
+    await persistActivitySnapshotNow(database, userId);
   }
 
   static async unsave(
@@ -54,6 +56,7 @@ export class SavedRoutine extends Model {
     await database.write(async () => {
       await Promise.all(rows.map((row) => row.destroyPermanently()));
     });
+    await persistActivitySnapshotNow(database, userId);
   }
 
   static async toggle(

@@ -1,32 +1,35 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
-  View, Text, Image, StyleSheet, TextInput, TouchableOpacity,
-  FlatList, Platform, Keyboard, ScrollView, Animated, BackHandler,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, Image,
+  FlatList, Platform, Keyboard, Animated, BackHandler, Easing,
   Modal, Share,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
+import PlatformBlur from "@/components/ui/PlatformBlur";
 import { theme } from "@/constants/theme";
-import { router, useFocusEffect } from "expo-router";
+import { User } from "@/models/User";
+import database from "@/database/database";
+import { useFocusEffect } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import { Paywall } from "@/components/ui/RevenueCat/Paywall";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { haptics } from "@/utils/haptics";
 import {
   useChatEngine, loadChatUserData, loadChatDailyCount,
   loadChatSavedMessages, FREE_DAILY_LIMIT, type ChatMessage,
+  buildUserContext, buildWorkoutContext, buildNutritionContext,
 } from "@/hooks/useChatEngine";
 import { parseHtmlResponse } from "@/components/ui/Chatbot/ChatRenderer";
 import FadeTranslate from "@/components/ui/FadeTranslate";
+import { useProfilePicture } from "@/utils/profilePicture";
+
+const DEFAULT_AVATAR = require("@/assets/avatars/avatar1.jpg");
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const AI_VIDEO = require("@/assets/videos/AI.mp4");
-const PROFILE_AVATAR = require("@/assets/avatars/avatar1.jpg");
 
 const GREETING_SUGGESTIONS = [
   { icon: "time-outline",         text: "15 min meals",         color: "#22C55E" },
@@ -53,6 +56,27 @@ const GREETING_VARIANTS = [
   "How may I help today?",
   "What would you like to know?",
 ];
+
+const CONTEXT_OPTIONS = [
+  {
+    key: "user" as const,
+    icon: "person-outline",
+    label: "Your stats",
+    description: "Goals, body metrics, and fitness level",
+  },
+  {
+    key: "workout" as const,
+    icon: "barbell-outline",
+    label: "Recent workouts",
+    description: "Completed routines and training activity",
+  },
+  {
+    key: "nutrition" as const,
+    icon: "nutrition-outline",
+    label: "Nutrition",
+    description: "Recent meals, calories, and macros",
+  },
+] as const;
 
 // ─── Message entry animation ───────────────────────────────────────────────────
 
@@ -93,6 +117,10 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showSavedMessages, setShowSavedMessages] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [showContextPicker, setShowContextPicker] = useState(false);
+  const [contextFlags, setContextFlags] = useState({ user: false, workout: false, nutrition: false });
+  const [userName, setUserName] = useState("");
+  const profilePicUri = useProfilePicture();
   const [greetingMessage] = useState(
     () => GREETING_VARIANTS[Math.floor(Math.random() * GREETING_VARIANTS.length)],
   );
@@ -102,6 +130,7 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
 
   const flatListRef = useRef<FlatList>(null);
   const thinkingOpacity = useRef(new Animated.Value(0.4)).current;
+  const contextPickerAnim = useRef(new Animated.Value(0)).current;
   const seededRef = useRef(false);
 
   const videoPlayer = useVideoPlayer(AI_VIDEO, (p) => {
@@ -120,6 +149,9 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
       loadChatUserData();
       loadChatDailyCount();
       loadChatSavedMessages();
+      User.getUserDetails(database)
+        .then((u) => { if (mounted && u?.name) setUserName(u.name.split(" ")[0]); })
+        .catch(() => {});
 
       const onBack = () => {
         if (onRequestClose) { onRequestClose(); return true; }
@@ -153,6 +185,27 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
     return () => { loop.stop(); thinkingOpacity.setValue(0.4); };
   }, [isLoading, thinkingOpacity]);
 
+  useEffect(() => {
+    contextPickerAnim.stopAnimation();
+    const animation = Animated.timing(contextPickerAnim, {
+      toValue: showContextPicker ? 1 : 0,
+      duration: showContextPicker ? 220 : 150,
+      easing: showContextPicker ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    });
+    animation.start();
+
+    return () => animation.stop();
+  }, [showContextPicker, contextPickerAnim]);
+
+  const closeContextPicker = useCallback(() => {
+    setShowContextPicker(false);
+  }, []);
+
+  const toggleContextPicker = useCallback(() => {
+    setShowContextPicker((visible) => !visible);
+  }, []);
+
   // Auto-seed message (from workout ask bar)
   useEffect(() => {
     const seed = initialMessage?.trim();
@@ -167,8 +220,17 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
     if (!text) return;
     setInputText("");
     Keyboard.dismiss();
-    await sendMessage(text, undefined, () => setShowPaywall(true));
-  }, [inputText, sendMessage]);
+
+    // Build explicit context from whatever the user has toggled on.
+    const parts: string[] = [];
+    if (contextFlags.user)      parts.push(await buildUserContext());
+    if (contextFlags.workout)   parts.push(await buildWorkoutContext());
+    if (contextFlags.nutrition) parts.push(await buildNutritionContext());
+    const ctx = parts.filter(Boolean).join("\n\n");
+
+    // Pass ctx (even empty string) so auto-detect is skipped in the Chatbot screen.
+    await sendMessage(text, undefined, () => setShowPaywall(true), ctx);
+  }, [inputText, sendMessage, contextFlags]);
 
   const handleShare = async (msg: ChatMessage) => {
     try { await Share.share({ message: msg.text, title: "AI Response" }); } catch {}
@@ -215,6 +277,12 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
   );
 
   const isFree = subscriptionPlan === "FREE" || subscriptionPlan === "Free";
+  // iOS never auto-resizes for the keyboard; on Android the askbar *overlay*
+  // (onRequestClose set) is an absolute full-screen layer that also ignores the
+  // window resize, so in both cases we lift the input manually. The standalone
+  // chatbot *tab* relies on Android's native adjustResize instead.
+  const liftForKeyboard = Platform.OS === "ios" || !!onRequestClose;
+  const kbPad = liftForKeyboard ? keyboardHeight : 0;
 
   return (
     <>
@@ -229,53 +297,90 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
 
         {/* ── Header ── */}
         <View style={[st.header, { paddingTop: insets.top + 8 }]}>
-          {/* Back */}
-          <TouchableOpacity
-            style={st.hBtn}
-            onPress={() => onRequestClose ? onRequestClose() : navigation.navigate("nutrition")}
-            activeOpacity={0.7}
-          >
-            <BlurView
-              intensity={40} tint="dark"
-              experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : undefined}
-              style={st.hBtnBlur}
+          {/* Left — close + context text */}
+          <View style={st.hLeftGroup}>
+            <TouchableOpacity
+              style={st.hBtn}
+              onPress={() => onRequestClose ? onRequestClose() : navigation.navigate("nutrition")}
+              activeOpacity={0.7}
             >
-              <Ionicons name={onRequestClose ? "chevron-down" : "arrow-back"} size={20} color="#AEAEB2" />
-            </BlurView>
-          </TouchableOpacity>
+              <PlatformBlur intensity={40} tint="dark" androidColor="rgba(26,26,28,0.92)" style={st.hBtnBlur}>
+                <Ionicons name={onRequestClose ? "chevron-down" : "grid-outline"} size={19} color="#AEAEB2" />
+              </PlatformBlur>
+            </TouchableOpacity>
 
-          {/* Center — plan badge */}
-          <TouchableOpacity
-            style={[st.planBadge, isFree && st.planBadgeFree]}
-            onPress={() => isFree && setShowPaywall(true)}
-            activeOpacity={isFree ? 0.75 : 1}
-          >
-            <Ionicons name="sparkles" size={12} color={C.primary} />
-            {isFree ? (
-              <View style={{ alignItems: "center" }}>
-                <Text style={st.planText}>{`${FREE_DAILY_LIMIT - dailyMessageCount}/${FREE_DAILY_LIMIT} left`}</Text>
-                <Text style={st.planSub}>Get Unlimited</Text>
-              </View>
-            ) : (
-              <Text style={st.planText}>Unlimited</Text>
-            )}
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={st.ctxTextBtn}
+              onPress={toggleContextPicker}
+              activeOpacity={0.7}
+            >
+              <Text style={st.ctxText}>
+                <Text style={st.ctxInclude}>Include </Text>
+                <Text style={(contextFlags.user || contextFlags.workout || contextFlags.nutrition) && { color: C.primary }}>
+                  Context
+                </Text>
+              </Text>
+              <Ionicons
+                name={showContextPicker ? "chevron-up" : "chevron-down"}
+                size={11}
+                color={(contextFlags.user || contextFlags.workout || contextFlags.nutrition) ? C.primary : "#48484A"}
+              />
+            </TouchableOpacity>
+          </View>
 
-          {/* Saved */}
+          {/* Right — bookmark */}
           <TouchableOpacity
             style={st.hBtn}
             onPress={async () => { await loadChatSavedMessages(); setShowSavedMessages(true); }}
             activeOpacity={0.7}
           >
-            <BlurView
-              intensity={40} tint="dark"
-              experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : undefined}
-              style={st.hBtnBlur}
-            >
-              <Ionicons name="bookmark-outline" size={20} color="#AEAEB2" />
-            </BlurView>
+            <PlatformBlur intensity={40} tint="dark" androidColor="rgba(26,26,28,0.92)" style={st.hBtnBlur}>
+              <Ionicons name="bookmark-outline" size={19} color="#AEAEB2" />
+            </PlatformBlur>
           </TouchableOpacity>
         </View>
+
+        {/* ── Context dropdown (inline, no sheet) ── */}
+        <Animated.View
+          pointerEvents={showContextPicker ? "auto" : "none"}
+          style={[
+            st.ctxDropdown,
+            {
+              top: insets.top + 58,
+              opacity: contextPickerAnim,
+              transform: [{
+                translateY: contextPickerAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-10, 0],
+                }),
+              }],
+            },
+          ]}
+        >
+          <View style={st.ctxOptions}>
+            {CONTEXT_OPTIONS.map((item) => {
+              const on = contextFlags[item.key];
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={st.dropRow}
+                  onPress={() => setContextFlags((f) => ({ ...f, [item.key]: !f[item.key] }))}
+                  activeOpacity={0.55}
+                >
+                  <Ionicons
+                    name={item.icon}
+                    size={20}
+                    color={on ? C.primary : "#AEAEB2"}
+                  />
+                  <View style={st.dropCopy}>
+                    <Text style={[st.dropLabel, on && st.dropLabelSelected]}>{item.label}</Text>
+                    <Text style={st.dropDescription}>{item.description}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Animated.View>
 
         {/* ── Messages ── */}
         <FlatList
@@ -287,10 +392,11 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
             st.listContent,
             {
               paddingTop: insets.top + 84,
-              paddingBottom: insets.bottom + 100 + (Platform.OS === "ios" ? keyboardHeight : 0),
+              paddingBottom: insets.bottom + (isFree ? 190 : 150) + kbPad,
             },
           ]}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onScrollBeginDrag={closeContextPicker}
           onScrollEndDrag={
             onRequestClose
               ? (e) => { if (e.nativeEvent.contentOffset.y <= -70) onRequestClose(); }
@@ -301,6 +407,12 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
           ListEmptyComponent={
             <View style={st.emptyWrap}>
               <FadeTranslate order={0}>
+                <Text style={st.greetHi}>Hello {userName || "Athlete"}!</Text>
+              </FadeTranslate>
+              <FadeTranslate order={1}>
+                <Text style={st.greetQuestion}>{greetingMessage}</Text>
+              </FadeTranslate>
+              <FadeTranslate order={2}>
                 <VideoView
                   player={videoPlayer}
                   style={st.greetingVideo}
@@ -309,12 +421,9 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
                   playsInline
                 />
               </FadeTranslate>
-              <FadeTranslate order={1}>
-                <Text style={st.greetingText}>{greetingMessage}</Text>
-              </FadeTranslate>
               <View style={st.suggestionsGrid}>
                 {randomSuggestions.map((s, i) => (
-                  <FadeTranslate key={i} order={i + 2}>
+                  <FadeTranslate key={i} order={i + 3}>
                     <TouchableOpacity
                       onPress={() => send(s.text)}
                       activeOpacity={0.75}
@@ -351,44 +460,63 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
         <View
           style={[
             st.inputWrap,
-            Platform.OS === "ios"
-              ? { bottom: keyboardHeight, paddingBottom: keyboardHeight > 0 ? 10 : insets.bottom + 12 }
-              : { paddingBottom: insets.bottom + 12 },
+            {
+              bottom: kbPad,
+              paddingBottom: kbPad > 0 ? 10 : insets.bottom + 12,
+            },
           ]}
         >
-          <View style={st.askBar}>
-            <TouchableOpacity
-              style={st.askAvatar}
-              onPress={() => { onRequestClose?.(); router.push("/profile"); }}
-              activeOpacity={0.8}
-            >
-              <Image source={PROFILE_AVATAR} style={st.askAvatarImg} />
-            </TouchableOpacity>
+          <View style={st.composerSurface}>
+            {isFree && (
+              <TouchableOpacity
+                style={st.statusRow}
+                activeOpacity={0.72}
+                onPress={() => setShowPaywall(true)}
+              >
+                <View style={st.statusLeft}>
+                  <View style={st.statusDot} />
+                  <Text style={st.statusText}>
+                    {Math.max(FREE_DAILY_LIMIT - dailyMessageCount, 0)}/{FREE_DAILY_LIMIT} messages left
+                  </Text>
+                </View>
+                <Text style={st.statusCta}>Get Unlimited</Text>
+              </TouchableOpacity>
+            )}
 
-            <TextInput
-              style={st.askInput}
-              placeholder="Ask me anything…"
-              placeholderTextColor="#636366"
-              value={inputText}
-              onChangeText={setInputText}
-              maxLength={1000}
-              returnKeyType="send"
-              onSubmitEditing={() => send()}
-              underlineColorAndroid="transparent"
-            />
+            <View style={st.askBar}>
+              <View style={st.avatarBtn}>
+                <Image
+                  source={profilePicUri ? { uri: profilePicUri } : DEFAULT_AVATAR}
+                  style={st.avatarBtnImg}
+                />
+              </View>
 
-            <TouchableOpacity
-              style={[st.sendBtn, !inputText.trim() && st.sendBtnDisabled]}
-              onPress={() => send()}
-              disabled={!inputText.trim() || isLoading}
-              activeOpacity={0.85}
-            >
-              <Ionicons
-                name={isLoading ? "stop" : "arrow-up"}
-                size={18}
-                color="#000"
+              <TextInput
+                style={st.askInput}
+                placeholder="What can I help you with?"
+                placeholderTextColor="#636366"
+                value={inputText}
+                onChangeText={setInputText}
+                maxLength={1000}
+                returnKeyType="send"
+                onSubmitEditing={() => send()}
+                onFocus={closeContextPicker}
+                underlineColorAndroid="transparent"
               />
-            </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[st.sendBtn, !inputText.trim() && st.sendBtnIdle]}
+                onPress={() => send()}
+                disabled={!inputText.trim() || isLoading}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name="arrow-up"
+                  size={18}
+                  color={inputText.trim() ? "#000" : "#AEAEB2"}
+                />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -470,6 +598,7 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
         onPurchaseCompleted={() => { setShowPaywall(false); setSubscriptionPlan("PRO"); }}
         onRestoreCompleted={() => { setShowPaywall(false); setSubscriptionPlan("PRO"); }}
       />
+
     </>
   );
 }
@@ -497,6 +626,7 @@ const st = StyleSheet.create({
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
     paddingHorizontal: 20, paddingBottom: 12,
   },
+  hLeftGroup: { flexDirection: "row", alignItems: "center", gap: 10 },
   hBtn: {
     width: 44, height: 44, borderRadius: 22, overflow: "hidden",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
@@ -505,16 +635,31 @@ const st = StyleSheet.create({
     flex: 1, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.55)",
   },
-  planBadge: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 18, paddingVertical: 9,
-    borderRadius: 22, backgroundColor: C.deep,
-    borderWidth: 1, borderColor: "rgba(170,251,5,0.28)",
-    minHeight: 40,
+  ctxTextBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+  ctxText: { fontFamily: theme.medium, fontSize: 14, color: "#636366" },
+  ctxInclude: { fontFamily: theme.bold, color: "#FFFFFF" },
+  ctxDropdown: {
+    position: "absolute", left: 20, right: 20, zIndex: 200,
+    maxWidth: 380,
+    backgroundColor: "#171719",
+    borderWidth: 1,
+    borderColor: "#343437",
+    borderRadius: 18,
+    paddingHorizontal: 10, paddingVertical: 8,
   },
-  planBadgeFree: { flexDirection: "column", gap: 1, paddingVertical: 6 },
-  planText: { fontSize: 13, fontFamily: theme.medium, color: C.primary },
-  planSub:  { fontSize: 10, fontFamily: theme.medium, color: C.primary, opacity: 0.75 },
+  ctxOptions: { gap: 2 },
+  dropRow: {
+    minHeight: 58,
+    flexDirection: "row", alignItems: "center", gap: 13,
+    paddingHorizontal: 4, paddingVertical: 7,
+  },
+  dropCopy: { flex: 1 },
+  dropLabel: { fontFamily: theme.semibold, fontSize: 14, color: "#FFFFFF" },
+  dropLabelSelected: { color: C.primary },
+  dropDescription: {
+    fontFamily: theme.regular, fontSize: 11.5, lineHeight: 16,
+    color: "#7A7A7E", marginTop: 1,
+  },
 
   // ── Messages ──
   listContent: {
@@ -537,12 +682,8 @@ const st = StyleSheet.create({
   msgText: { fontSize: 15, fontFamily: theme.regular, color: C.text, lineHeight: 22 },
   aiContent: { flexDirection: "column" as const, gap: 6 },
 
-  actions: { flexDirection: "row", gap: 4, marginTop: 10, paddingLeft: 2 },
-  actionBtn: {
-    padding: 7, borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.06)",
-  },
+  actions: { flexDirection: "row", gap: 2, marginTop: 10, paddingLeft: 2 },
+  actionBtn: { padding: 7 },
 
   // ── Loading ──
   loadingRow: {
@@ -555,13 +696,18 @@ const st = StyleSheet.create({
   // ── Empty / greeting ──
   emptyWrap: {
     flex: 1, alignItems: "center", justifyContent: "center",
-    paddingVertical: 80, paddingHorizontal: 20,
+    paddingVertical: 60, paddingHorizontal: 20,
   },
-  greetingVideo: { width: 160, height: 160, marginBottom: 18, backgroundColor: "transparent" },
-  greetingText: {
-    fontSize: 26, fontFamily: theme.semibold, color: C.text,
-    textAlign: "center", marginBottom: 28, letterSpacing: -0.5,
+  greetHi: {
+    fontSize: 17, fontFamily: theme.medium, color: C.sub,
+    textAlign: "center", marginBottom: 6,
   },
+  greetQuestion: {
+    fontSize: 28, fontFamily: theme.bold, color: C.text,
+    textAlign: "center", marginBottom: 8, letterSpacing: -0.6, lineHeight: 34,
+    paddingHorizontal: 10,
+  },
+  greetingVideo: { width: 190, height: 190, marginVertical: 14, backgroundColor: "transparent" },
   suggestionsGrid: {
     flexDirection: "row", flexWrap: "wrap",
     justifyContent: "center", gap: 10,
@@ -580,28 +726,43 @@ const st = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 10,
     zIndex: 100,
   },
-  askBar: {
-    flexDirection: "row", alignItems: "center", gap: 8,
+  composerSurface: {
     width: "100%", maxWidth: 600, alignSelf: "center" as const,
-    height: 54, paddingLeft: 6, paddingRight: 6,
-    borderRadius: 27, backgroundColor: "#17191B",
+    paddingHorizontal: 6, paddingTop: 6, paddingBottom: 7,
+    borderRadius: 27,
+    backgroundColor: "#17191B",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
   },
-  askAvatar: {
-    width: 42, height: 42, borderRadius: 21,
-    overflow: "hidden", backgroundColor: "#161618",
+  statusRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 10, paddingTop: 4, paddingBottom: 9,
+    marginHorizontal: 3, marginBottom: 2,
+    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)",
   },
-  askAvatarImg: { width: "100%", height: "100%" },
+  statusLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
+  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.primary },
+  statusText: { fontSize: 12, fontFamily: theme.medium, color: C.sub },
+  statusCta: { fontSize: 12, fontFamily: theme.semibold, color: C.primary },
+  askBar: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    width: "100%", height: 48,
+    paddingLeft: 0, paddingRight: 0,
+  },
+  avatarBtn: {
+    width: 42, height: 42, borderRadius: 21, overflow: "hidden",
+    backgroundColor: "#2C2C2E",
+  },
+  avatarBtnImg: { width: 42, height: 42, borderRadius: 21 },
   askInput: {
     flex: 1, color: C.text, fontFamily: theme.regular,
-    fontSize: 14.5, paddingVertical: 0,
+    fontSize: 14.5, paddingVertical: 0, paddingHorizontal: 6,
     textAlignVertical: "center",
   } as any,
   sendBtn: {
     width: 42, height: 42, borderRadius: 21,
     backgroundColor: C.primary, alignItems: "center", justifyContent: "center",
   },
-  sendBtnDisabled: { backgroundColor: "#3A3A3C" },
+  sendBtnIdle: { backgroundColor: "rgba(255,255,255,0.08)" },
 
   // ── Saved sheet ──
   sheetBg: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" },
@@ -641,4 +802,5 @@ const st = StyleSheet.create({
   },
   emptySheetTitle: { fontSize: 17, fontFamily: theme.semibold, color: C.sub },
   emptySheetSub: { fontSize: 14, fontFamily: theme.regular, color: C.muted },
+
 });

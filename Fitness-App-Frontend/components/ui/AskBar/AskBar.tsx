@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, ScrollView, Image, Dimensions,
-  StyleSheet, Animated, Easing, Keyboard, ActivityIndicator, Alert,
+  StyleSheet, Animated, Easing, Keyboard, ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -16,8 +16,17 @@ import { Meal } from "@/models/Meals";
 import database from "@/database/database";
 import { getUserIdFromToken } from "@/api/TokenDecoder";
 import { useTabBarVisibility } from "@/components/ui/TabBarUi/TabBarVisibility";
-import { useAskBarRegister, useBumpMeals, useIslandState, useAvatarPulse, useSettingsIsland } from "./AskBarContext";
+import {
+  useAskBarRegister,
+  useBumpMeals,
+  useIslandState,
+  useAvatarPulse,
+  useSettingsIsland,
+  useChatTransition,
+} from "./AskBarContext";
+import { useProfilePicture } from "@/utils/profilePicture";
 import { haptics } from "@/utils/haptics";
+import { showErrorToast } from "@/utils/toast";
 import { useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
 import { AIEndpoint } from "@/api/AIEndpoint";
@@ -25,6 +34,7 @@ import ScanIsland from "./ScanIsland";
 import SettingsIsland from "./SettingsIsland";
 import Chatbot from "@/app/(screens)/Chatbot";
 import ChatIsland from "./ChatIsland";
+import UserProfileCard, { PROFILE_CARD_HEIGHT } from "@/components/ui/Profile/UserProfileCard";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const H_PAD = 18;
@@ -32,7 +42,7 @@ const MAX_RESULTS = 30;
 const PULL_TO_CHAT = 130;
 
 const C = { bg: "#000", primary: "#AAFB05", text: "#fff", sub: "#8E8E93", pill: "#17191B" };
-const AVATAR = require("@/assets/avatars/avatar1.jpg");
+const DEFAULT_AVATAR = require("@/assets/avatars/avatar1.jpg");
 
 type Tab = "workout" | "nutrition" | "profile";
 
@@ -113,7 +123,9 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const bumpMeals = useBumpMeals();
   const island = useIslandState();
   const avatarPulse = useAvatarPulse();
-  const { close: closeIsland } = useSettingsIsland();
+  const chatAnim = useChatTransition();
+  const { close: closeIsland, open: openIsland } = useSettingsIsland();
+  const profilePicUri = useProfilePicture();
 
   const tab = (["workout", "nutrition", "profile"].includes(activeTab) ? activeTab : "workout") as Tab;
   const HEADER_H = insets.top + 70;
@@ -134,10 +146,11 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const barStretch = useRef(new Animated.Value(0)).current;
   const pressScale = useRef(new Animated.Value(1)).current;
   const focusGlow = useRef(new Animated.Value(0)).current;
-  const chatAnim = useRef(new Animated.Value(0)).current;
   const scanAnim = useRef(new Animated.Value(0)).current;
   const scanPillAnim = useRef(new Animated.Value(0)).current;
   const scanGlow = useRef(new Animated.Value(0)).current;
+  const settingsGlow = useRef(new Animated.Value(0)).current;
+  const chatIslandGlow = useRef(new Animated.Value(0)).current;
   const settingsAnim = useRef(new Animated.Value(0)).current;
   const avatarFlip = useRef(new Animated.Value(0)).current;
   const firstPulse = useRef(true);
@@ -157,6 +170,11 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
     return () => { cancelled = true; unsub(); };
   }, []);
 
+  // Collapse bar when ChatIsland is active so the bar never protrudes behind it.
+  useEffect(() => {
+    if (chatIslandQ) barStretch.setValue(0);
+  }, [chatIslandQ, barStretch]);
+
   // Keep the AI glow lit while the scan camera is open and while scanning.
   useEffect(() => {
     Animated.timing(scanGlow, {
@@ -165,6 +183,33 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
       useNativeDriver: false,
     }).start();
   }, [scanState, scanGlow]);
+
+  // The scan camera/pill replaces the normal bar. Keep the hidden bar collapsed
+  // so overscroll underneath cannot make it protrude behind the scan UI.
+  useEffect(() => {
+    if (scanState !== "idle") {
+      barStretch.setValue(0);
+      inputRef.current?.blur();
+    }
+  }, [scanState, barStretch]);
+
+  // Glow while settings island is open.
+  useEffect(() => {
+    Animated.timing(settingsGlow, {
+      toValue: island ? 1 : 0,
+      duration: 240,
+      useNativeDriver: false,
+    }).start();
+  }, [island, settingsGlow]);
+
+  // Glow while chat island is active (waiting for response + displaying it).
+  useEffect(() => {
+    Animated.timing(chatIslandGlow, {
+      toValue: chatIslandQ ? 1 : 0,
+      duration: 240,
+      useNativeDriver: false,
+    }).start();
+  }, [chatIslandQ, chatIslandGlow]);
 
   // Expand the island when a screen pushes settings content; collapse when cleared.
   useEffect(() => {
@@ -186,6 +231,10 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
     Animated.timing(avatarFlip, { toValue: 1, duration: 560, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, [avatarPulse, avatarFlip]);
 
+  const openProfileIsland = useCallback(() => {
+    openIsland(<UserProfileCard />, PROFILE_CARD_HEIGHT);
+  }, [openIsland]);
+
   const enterChat = useCallback((seed?: string) => {
     const trimmed = seed?.trim();
     setChatSeed(trimmed || undefined);
@@ -194,9 +243,10 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
     Keyboard.dismiss();
     setText("");
     haptics.light();
+    barStretch.setValue(0);
     chatAnim.setValue(0);
     Animated.timing(chatAnim, { toValue: 1, duration: 340, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-  }, [chatAnim, setHidden]);
+  }, [barStretch, chatAnim, setHidden]);
 
   const exitChat = useCallback(() => {
     setHidden(false);
@@ -238,7 +288,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
       setCelebrate((c) => c + 1);
     } catch (e) {
       console.log("scan error", e);
-      Alert.alert("Scan failed", "Couldn't analyze that meal. Please try again.");
+      showErrorToast("Scan failed", "Couldn't analyze that meal. Please try again.");
     } finally {
       Animated.timing(scanPillAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(({ finished }) => {
         if (finished) setScanState("idle");
@@ -275,9 +325,18 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
 
   // Screens drive these via context (overscroll → grow + open chat)
   useAskBarRegister(useMemo(() => ({
-    onScroll: (y: number) => { barStretch.setValue(y < 0 ? Math.min(-y, 170) : 0); },
-    onEndDrag: (y: number) => { if (!chatVisible && y <= -PULL_TO_CHAT) enterChat(); },
-  }), [barStretch, chatVisible, enterChat]));
+    onScroll: (y: number) => {
+      if (!chatIslandQ && scanState === "idle") {
+        barStretch.setValue(y < 0 ? Math.min(-y, 170) : 0);
+      }
+    },
+    onEndDrag: (y: number) => {
+      if (!chatVisible && scanState === "idle" && y <= -PULL_TO_CHAT) enterChat();
+    },
+    onPull: () => {
+      if (!chatVisible && scanState === "idle") enterChat();
+    },
+  }), [barStretch, chatVisible, enterChat, chatIslandQ, scanState]));
 
   const onFocus = () => {
     setFocused(true);
@@ -340,14 +399,20 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   // ── Animated styles ──
   const askBarHeight = barStretch.interpolate({ inputRange: [0, 170], outputRange: [54, 150], extrapolate: "clamp" });
   const askBarRadius = barStretch.interpolate({ inputRange: [0, 170], outputRange: [27, 38], extrapolate: "clamp" });
-  // Glow is fully invisible at rest — it only appears while overscrolling (the
-  // bar growing) or when the input is focused for typing.
+  // Glow is invisible at rest — lights up when overscrolling, focused, scanning,
+  // settings island open, or chat island active.
   const glowOpacity = Animated.add(
     Animated.add(
-      barStretch.interpolate({ inputRange: [0, 160], outputRange: [0, 1], extrapolate: "clamp" }),
-      focusGlow.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" })
+      Animated.add(
+        Animated.add(
+          barStretch.interpolate({ inputRange: [0, 160], outputRange: [0, 1], extrapolate: "clamp" }),
+          focusGlow.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" })
+        ),
+        scanGlow
+      ),
+      settingsGlow
     ),
-    scanGlow
+    chatIslandGlow
   );
   const avatarRotate = avatarFlip.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   const avatarGlowOpacity = avatarFlip.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 1, 0] });
@@ -404,14 +469,22 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
           </Svg>
         </Animated.View>
 
-        <Animated.View style={[st.askBar, { height: askBarHeight, borderRadius: askBarRadius, transform: [{ scale: pressScale }] }]}>
+        <Animated.View
+          style={[st.askBar, {
+            height: askBarHeight,
+            borderRadius: askBarRadius,
+            transform: [{ scale: pressScale }],
+            opacity: chatIslandQ || scanState !== "idle" ? 0 : 1,
+          }]}
+          pointerEvents={chatIslandQ || scanState !== "idle" ? "none" : "auto"}
+        >
           <View style={st.avatarWrap}>
             <Animated.View pointerEvents="none" style={[st.avatarGlow, { opacity: avatarGlowOpacity }]}>
               <LinearGradient colors={["#AAFB05", "#00D4FF", "#A24BFF", "#FF4B96"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
             </Animated.View>
             <Animated.View style={{ transform: [{ perspective: 700 }, { rotateY: avatarRotate }] }}>
-              <TouchableOpacity style={st.avatar} activeOpacity={0.8} onPress={() => router.push("/profile")} accessibilityLabel="Open profile">
-                <Image source={AVATAR} style={{ width: "100%", height: "100%" }} />
+              <TouchableOpacity style={st.avatar} activeOpacity={0.8} onPress={openProfileIsland} accessibilityLabel="Open profile">
+                <Image source={profilePicUri ? { uri: profilePicUri } : DEFAULT_AVATAR} style={{ width: "100%", height: "100%" }} />
               </TouchableOpacity>
             </Animated.View>
           </View>
@@ -513,8 +586,23 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
         </Animated.View>
       )}
 
+      {/* Floating avatar — rendered only when an island covers the bar */}
+      {(localIsland != null || chatIslandQ != null) && <View
+        style={[st.floatingAvatarWrap, { top: insets.top + 10 }]}
+        pointerEvents="box-none"
+      >
+        <Animated.View pointerEvents="none" style={[st.avatarGlow, { opacity: avatarGlowOpacity }]}>
+          <LinearGradient colors={["#AAFB05", "#00D4FF", "#A24BFF", "#FF4B96"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        </Animated.View>
+        <Animated.View style={{ transform: [{ perspective: 700 }, { rotateY: avatarRotate }] }}>
+          <TouchableOpacity style={st.avatar} activeOpacity={0.8} onPress={openProfileIsland} accessibilityLabel="Open profile">
+            <Image source={profilePicUri ? { uri: profilePicUri } : DEFAULT_AVATAR} style={{ width: "100%", height: "100%" }} />
+          </TouchableOpacity>
+        </Animated.View>
+      </View>}
+
       {celebrate > 0 && (
-        <ConfettiCannon key={celebrate} count={70} origin={{ x: SCREEN_W / 2, y: 0 }} fadeOut autoStart explosionSpeed={420} fallSpeed={3000} />
+        <ConfettiCannon key={celebrate} count={70} origin={{ x: SCREEN_W / 2, y: 0 }} fadeOut autoStart explosionSpeed={420} fallSpeed={3000} colors={["#AAFB05", "#7BE500", "#C8FF4A", "#5BC400", "#E8FF99"]} />
       )}
     </>
   );
@@ -545,6 +633,15 @@ const st = StyleSheet.create({
   addBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.primary, alignItems: "center", justifyContent: "center" },
   hint: { color: "rgba(255,255,255,0.5)", fontFamily: theme.medium, fontSize: 13 },
 
+  floatingAvatarWrap: {
+    position: "absolute",
+    left: H_PAD + 6,
+    width: 42,
+    height: 54,
+    zIndex: 55,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   chatOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 60, backgroundColor: C.bg },
   scanPill: {
     position: "absolute",

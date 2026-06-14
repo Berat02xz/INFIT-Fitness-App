@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { Dimensions, StyleSheet, View } from "react-native";
+import { Dimensions, Platform, StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
   interpolate,
@@ -58,6 +58,9 @@ function ConstellationBackground() {
   const breath = useSharedValue(0);
 
   useEffect(() => {
+    // Android keeps the glow static — a permanent per-frame loop behind the whole
+    // nutrition screen is a meaningful frame-rate cost there.
+    if (Platform.OS === "android") { breath.value = 0.5; return; }
     breath.value = withRepeat(
       withTiming(1, { duration: 6000, easing: Easing.inOut(Easing.sin) }),
       -1,

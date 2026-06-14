@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { BlurView } from "expo-blur";
+import { Ionicons } from "@expo/vector-icons";
+import PlatformBlur from "@/components/ui/PlatformBlur";
 import Animated, { FadeIn, FadeOut, ZoomIn } from "react-native-reanimated";
 
 import { theme } from "@/constants/theme";
@@ -53,10 +54,18 @@ export default function MealDetailOverlay({
       style={styles.root}
     >
       <Pressable style={styles.fill} onPress={onClose}>
-        <BlurView intensity={40} tint="dark" style={styles.fill} />
+        <PlatformBlur intensity={40} tint="dark" androidColor="rgba(0,0,0,0.86)" style={styles.fill} />
         <View style={styles.scrim} />
 
         <Animated.View entering={ZoomIn.duration(220)} style={styles.center} pointerEvents="none">
+          {meal.isScanned && meal.scannedAt && (
+            <View style={styles.scanPill}>
+              <Ionicons name="scan-outline" size={11} color="#AAFB05" />
+              <Text style={styles.scanDate}>
+                {new Date(meal.scannedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </Text>
+            </View>
+          )}
           <Text style={styles.name} numberOfLines={2}>
             {meal.name}
           </Text>
@@ -161,5 +170,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "rgba(255,255,255,0.5)",
     marginLeft: 4,
+  },
+  scanPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(170,251,5,0.12)",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(170,251,5,0.25)",
+  },
+  scanDate: {
+    fontSize: 11,
+    fontFamily: theme.medium,
+    color: "#AAFB05",
+    letterSpacing: 0.2,
   },
 });
