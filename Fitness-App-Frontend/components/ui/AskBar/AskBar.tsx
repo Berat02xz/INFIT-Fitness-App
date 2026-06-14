@@ -16,13 +16,15 @@ import { Meal } from "@/models/Meals";
 import database from "@/database/database";
 import { getUserIdFromToken } from "@/api/TokenDecoder";
 import { useTabBarVisibility } from "@/components/ui/TabBarUi/TabBarVisibility";
-import { useAskBarRegister, useBumpMeals } from "./AskBarContext";
+import { useAskBarRegister, useBumpMeals, useIslandState, useAvatarPulse, useSettingsIsland } from "./AskBarContext";
 import { haptics } from "@/utils/haptics";
 import { useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
 import { AIEndpoint } from "@/api/AIEndpoint";
 import ScanIsland from "./ScanIsland";
+import SettingsIsland from "./SettingsIsland";
 import Chatbot from "@/app/(screens)/Chatbot";
+import ChatIsland from "./ChatIsland";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const H_PAD = 18;
@@ -109,6 +111,9 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const insets = useSafeAreaInsets();
   const { setHidden } = useTabBarVisibility();
   const bumpMeals = useBumpMeals();
+  const island = useIslandState();
+  const avatarPulse = useAvatarPulse();
+  const { close: closeIsland } = useSettingsIsland();
 
   const tab = (["workout", "nutrition", "profile"].includes(activeTab) ? activeTab : "workout") as Tab;
   const HEADER_H = insets.top + 70;
@@ -122,6 +127,8 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const [chatSeed, setChatSeed] = useState<string | undefined>(undefined);
   const [celebrate, setCelebrate] = useState(0);
   const [scanState, setScanState] = useState<"idle" | "camera" | "scanning">("idle");
+  const [localIsland, setLocalIsland] = useState<{ node: React.ReactNode; height: number } | null>(null);
+  const [chatIslandQ, setChatIslandQ] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
 
   const barStretch = useRef(new Animated.Value(0)).current;
@@ -131,13 +138,16 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const scanAnim = useRef(new Animated.Value(0)).current;
   const scanPillAnim = useRef(new Animated.Value(0)).current;
   const scanGlow = useRef(new Animated.Value(0)).current;
+  const settingsAnim = useRef(new Animated.Value(0)).current;
+  const avatarFlip = useRef(new Animated.Value(0)).current;
+  const firstPulse = useRef(true);
   const inputRef = useRef<TextInput>(null);
 
   const isTyping = text.trim().length > 0;
   const isFood = tab === "nutrition";
 
-  // Clear search when switching tabs
-  useEffect(() => { setText(""); Keyboard.dismiss(); }, [tab]);
+  // Clear search + dismiss any open settings island when switching tabs
+  useEffect(() => { setText(""); Keyboard.dismiss(); closeIsland(); }, [tab, closeIsland]);
 
   // Warm exercise pool (workout search + nothing else needs it)
   useEffect(() => {
@@ -155,6 +165,26 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
       useNativeDriver: false,
     }).start();
   }, [scanState, scanGlow]);
+
+  // Expand the island when a screen pushes settings content; collapse when cleared.
+  useEffect(() => {
+    if (island) {
+      setLocalIsland(island);
+      settingsAnim.setValue(0);
+      Animated.timing(settingsAnim, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+    } else {
+      Animated.timing(settingsAnim, { toValue: 0, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: false }).start(({ finished }) => {
+        if (finished) setLocalIsland(null);
+      });
+    }
+  }, [island, settingsAnim]);
+
+  // Celebratory 3D avatar flip + colorful glow whenever a setting is saved.
+  useEffect(() => {
+    if (firstPulse.current) { firstPulse.current = false; return; }
+    avatarFlip.setValue(0);
+    Animated.timing(avatarFlip, { toValue: 1, duration: 560, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [avatarPulse, avatarFlip]);
 
   const enterChat = useCallback((seed?: string) => {
     const trimmed = seed?.trim();
@@ -319,6 +349,8 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
     ),
     scanGlow
   );
+  const avatarRotate = avatarFlip.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  const avatarGlowOpacity = avatarFlip.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 1, 0] });
   const chatScaleY = chatAnim.interpolate({ inputRange: [0, 1], outputRange: [0.12, 1] });
   const chatScaleX = chatAnim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] });
   const chatContentOpacity = chatAnim.interpolate({ inputRange: [0, 0.45, 1], outputRange: [0, 0.15, 1] });
@@ -373,9 +405,16 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
         </Animated.View>
 
         <Animated.View style={[st.askBar, { height: askBarHeight, borderRadius: askBarRadius, transform: [{ scale: pressScale }] }]}>
-          <TouchableOpacity style={st.avatar} activeOpacity={0.8} onPress={() => router.push("/profile")} accessibilityLabel="Open profile">
-            <Image source={AVATAR} style={{ width: "100%", height: "100%" }} />
-          </TouchableOpacity>
+          <View style={st.avatarWrap}>
+            <Animated.View pointerEvents="none" style={[st.avatarGlow, { opacity: avatarGlowOpacity }]}>
+              <LinearGradient colors={["#AAFB05", "#00D4FF", "#A24BFF", "#FF4B96"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+            </Animated.View>
+            <Animated.View style={{ transform: [{ perspective: 700 }, { rotateY: avatarRotate }] }}>
+              <TouchableOpacity style={st.avatar} activeOpacity={0.8} onPress={() => router.push("/profile")} accessibilityLabel="Open profile">
+                <Image source={AVATAR} style={{ width: "100%", height: "100%" }} />
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
 
           <Pressable style={{ flex: 1, minWidth: 0, justifyContent: "center", alignSelf: "stretch" }} onPress={() => { haptics.selection(); inputRef.current?.focus(); }}>
             <TextInput
@@ -386,7 +425,10 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
               onChangeText={setText}
               onFocus={onFocus}
               onBlur={onBlur}
-              onSubmitEditing={() => { const q = text.trim(); if (q) enterChat(q); }}
+              onSubmitEditing={() => {
+                const q = text.trim();
+                if (q) { setText(""); Keyboard.dismiss(); setChatIslandQ(q); }
+              }}
               returnKeyType="search"
               autoCorrect={false}
               selectionColor={C.primary}
@@ -408,7 +450,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
             </TouchableOpacity>
           )}
           {isTyping ? (
-            <TouchableOpacity style={[st.rightBtn, st.rightBtnActive]} activeOpacity={0.85} onPress={() => enterChat(text)} accessibilityLabel="Ask the AI assistant">
+            <TouchableOpacity style={[st.rightBtn, st.rightBtnActive]} activeOpacity={0.85} onPress={() => { const q = text.trim(); if (q) { setText(""); Keyboard.dismiss(); setChatIslandQ(q); } }} accessibilityLabel="Ask the AI assistant">
               <Ionicons name="sparkles" size={18} color="#000" />
             </TouchableOpacity>
           ) : isFood ? (
@@ -441,7 +483,28 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
         </Animated.View>
       )}
 
-      {/* Chat overlay — expands from the bar */}
+      {/* Settings island — a screen (Profile) expands the bar to edit a setting */}
+      {localIsland && (
+        <SettingsIsland
+          anim={settingsAnim}
+          topInset={insets.top}
+          height={localIsland.height}
+          onClose={closeIsland}
+        >
+          {localIsland.node}
+        </SettingsIsland>
+      )}
+
+      {/* Chat island — appears for typed queries, minimal inline response */}
+      {chatIslandQ && (
+        <ChatIsland
+          question={chatIslandQ}
+          topInset={insets.top}
+          onClose={() => setChatIslandQ(null)}
+        />
+      )}
+
+      {/* Chat overlay — expands from the bar (overscroll / no-text sparkles) */}
       {chatVisible && (
         <Animated.View style={[st.chatOverlay, { opacity: chatAnim, transformOrigin: `50% ${CHAT_ORIGIN_Y}px`, transform: [{ scaleX: chatScaleX }, { scaleY: chatScaleY }] }]}>
           <Animated.View style={{ flex: 1, opacity: chatContentOpacity }}>
@@ -464,6 +527,8 @@ const st = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 6, paddingRight: 6,
     backgroundColor: C.pill, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", overflow: "hidden",
   },
+  avatarWrap: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
+  avatarGlow: { position: "absolute", width: 52, height: 52, borderRadius: 26, overflow: "hidden" },
   avatar: { width: 42, height: 42, borderRadius: 21, overflow: "hidden", backgroundColor: "#161618" },
   input: { color: C.text, fontFamily: theme.medium, fontSize: 14.5, paddingVertical: 0 },
   placeholder: { color: "#8A8A8E", fontFamily: theme.medium, fontSize: 14.5 },

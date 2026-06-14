@@ -51,8 +51,9 @@ export default function NutritionFocus(props: {
   motivation: string;
   /** last-30-days daily calorie totals (oldest → newest) for the dot grid */
   days: number[];
+  todayIndex: number;
 }): React.JSX.Element {
-  const { consumed, target, isOver, onTrack, protein, carbs, fats, motivation, days } = props;
+  const { consumed, target, isOver, onTrack, protein, carbs, fats, motivation, days, todayIndex } = props;
 
   const remaining = Math.round(target - consumed);
   const statusColor = isOver ? C.over : onTrack ? C.onTrack : C.idle;
@@ -91,7 +92,7 @@ export default function NutritionFocus(props: {
 
         {/* RIGHT — 30-day contribution dots */}
         <View style={styles.right}>
-          <ContributionDots days={days} target={target} />
+          <ContributionDots days={days} todayIndex={todayIndex} target={target} />
         </View>
       </View>
 

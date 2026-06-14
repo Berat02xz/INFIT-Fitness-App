@@ -1,1 +1,42 @@
-.vs/
+# EAS archives from the Git repository root, one directory above this app.
+# Include only the frontend project and exclude sibling projects/files.
+/*
+!/Fitness-App-Frontend/
+!/Fitness-App-Frontend/**
+
+# Dependencies are installed by EAS Build.
+/Fitness-App-Frontend/node_modules/
+/Fitness-App-Frontend/.npm-cache/
+
+# Expo and Metro caches/build output.
+/Fitness-App-Frontend/.expo/
+/Fitness-App-Frontend/.expo-shared/
+/Fitness-App-Frontend/dist/
+/Fitness-App-Frontend/web-build/
+/Fitness-App-Frontend/metro-cache/
+/Fitness-App-Frontend/.expo-ios-export-check/
+
+# Local Android/Gradle/CMake output.
+/Fitness-App-Frontend/android/.gradle/
+/Fitness-App-Frontend/android/.kotlin/
+/Fitness-App-Frontend/android/build/
+/Fitness-App-Frontend/android/app/build/
+/Fitness-App-Frontend/android/local.properties
+/Fitness-App-Frontend/android/**/.cxx/
+/Fitness-App-Frontend/android/**/build/
+
+# Local iOS/Xcode output.
+/Fitness-App-Frontend/ios/Pods/
+/Fitness-App-Frontend/ios/build/
+/Fitness-App-Frontend/ios/*.xcworkspace/
+/Fitness-App-Frontend/ios/*.xcuserdata/
+
+# Local tools, logs, and environment files.
+/Fitness-App-Frontend/.vscode/
+/Fitness-App-Frontend/.idea/
+/Fitness-App-Frontend/.claude/
+/Fitness-App-Frontend/.env
+/Fitness-App-Frontend/.env.*.local
+/Fitness-App-Frontend/*.log
+/Fitness-App-Frontend/*.hprof
+/Fitness-App-Frontend/*.v2

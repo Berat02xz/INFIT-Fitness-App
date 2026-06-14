@@ -73,7 +73,8 @@ export default function NutritionScreen() {
   const [userData, setUserData] = useState<UserDTO | null>(null);
   const [todayMeals, setTodayMeals] = useState<Meal[]>([]);
   const [recentScanned, setRecentScanned] = useState<Meal[]>([]);
-  const [dailyTotals, setDailyTotals] = useState<number[]>([]);
+  const [monthTotals, setMonthTotals] = useState<number[]>([]);
+  const [monthTodayIndex, setMonthTodayIndex] = useState(-1);
   const [selectedMeal, setSelectedMeal] = useState<MealBubbleItem | null>(null);
   const [selectedAuto, setSelectedAuto] = useState(false);
 
@@ -81,14 +82,15 @@ export default function NutritionScreen() {
   const refetchMeals = useCallback(async () => {
     const userId = await getUserIdFromToken();
     if (!userId) return;
-    const [today, recents, daily] = await Promise.all([
+    const [today, recents, month] = await Promise.all([
       Meal.getTodayMeals(database, userId),
       Meal.getRecentScannedMeals(database, userId, 10),
-      Meal.getDailyCalorieTotals(database, userId, 30),
+      Meal.getMonthCalorieTotals(database, userId),
     ]);
     setTodayMeals(today);
     setRecentScanned(recents);
-    setDailyTotals(daily);
+    setMonthTotals(month.totals);
+    setMonthTodayIndex(month.todayIndex);
   }, []);
 
   // Refetch when the shared ask bar adds a food elsewhere → a bubble pops in.
@@ -249,7 +251,8 @@ export default function NutritionScreen() {
           carbs={totals.carbs}
           fats={totals.fats}
           motivation={motivation}
-          days={dailyTotals}
+          days={monthTotals}
+          todayIndex={monthTodayIndex}
         />
       </View>
 
