@@ -980,15 +980,6 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
                 underlineColorAndroid="transparent"
               />
 
-              <TouchableOpacity
-                style={styles.cameraInline}
-                onPress={() => router.push("/ScanMeal")}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Scan a meal"
-              >
-                <MaterialCommunityIcons name="camera-outline" size={22} color="#8A8A8E" />
-              </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.askSend, !inputText.trim() && !isLoading && styles.askSendDisabled]}
@@ -1520,12 +1511,6 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
     outlineStyle: 'none',
   } as any,
-  cameraInline: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   askSend: {
     width: 42,
     height: 42,

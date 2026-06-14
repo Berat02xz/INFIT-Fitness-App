@@ -113,4 +113,55 @@ static async deleteMealById(database: Database, id: string): Promise<void> {
   });
 }
 
+// Most recent scanned meals (label "scan"), de-duped by name, newest first.
+static async getRecentScannedMeals(database: Database, userId: string, limit = 10): Promise<Meal[]> {
+  const meals = await database
+    .get<Meal>("meals")
+    .query(
+      Q.and(Q.where("user_id", userId), Q.where("label", "scan")),
+      Q.sortBy("created_at", Q.desc)
+    )
+    .fetch();
+
+  const seen = new Set<string>();
+  const out: Meal[] = [];
+  for (const m of meals) {
+    const key = (m.mealName || "").toLowerCase();
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(m);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// Calories per day for the CURRENT calendar month. Returns one entry per day of
+// the month (index 0 = the 1st); days after today are 0 (future). `todayIndex`
+// is today's day-of-month minus one.
+static async getMonthCalorieTotals(
+  database: Database,
+  userId: string
+): Promise<{ totals: number[]; todayIndex: number }> {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayIndex = now.getDate() - 1;
+  const monthStart = new Date(year, month, 1).getTime();
+  const monthEnd = new Date(year, month + 1, 1).getTime();
+
+  const meals = await database
+    .get<Meal>("meals")
+    .query(Q.and(Q.where("user_id", userId), Q.where("created_at", Q.between(monthStart, monthEnd))))
+    .fetch();
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const totals = new Array<number>(daysInMonth).fill(0);
+  for (const m of meals) {
+    const idx = Math.floor((m.createdAt - monthStart) / dayMs);
+    if (idx >= 0 && idx < daysInMonth) totals[idx] += m.calories;
+  }
+  return { totals, todayIndex };
+}
+
 }

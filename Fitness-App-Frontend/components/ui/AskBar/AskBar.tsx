@@ -28,9 +28,9 @@ const { width: SCREEN_W } = Dimensions.get("window");
 const H_PAD = 18;
 const MAX_RESULTS = 30;
 const PULL_TO_CHAT = 130;
-const AVATAR = require("@/assets/avatars/avatar1.jpg");
 
 const C = { bg: "#000", primary: "#AAFB05", text: "#fff", sub: "#8E8E93", pill: "#17191B" };
+const AVATAR = require("@/assets/avatars/avatar1.jpg");
 
 type Tab = "workout" | "nutrition" | "profile";
 
@@ -130,8 +130,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const chatAnim = useRef(new Animated.Value(0)).current;
   const scanAnim = useRef(new Animated.Value(0)).current;
   const scanPillAnim = useRef(new Animated.Value(0)).current;
-  const drift1 = useRef(new Animated.Value(0)).current;
-  const drift2 = useRef(new Animated.Value(0)).current;
+  const scanGlow = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
 
   const isTyping = text.trim().length > 0;
@@ -148,18 +147,14 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
     return () => { cancelled = true; unsub(); };
   }, []);
 
-  // Slow drift of the AI glow blobs so the colors keep gently moving.
+  // Keep the AI glow lit while the scan camera is open and while scanning.
   useEffect(() => {
-    const loop = (v: Animated.Value, dur: number) =>
-      Animated.loop(Animated.sequence([
-        Animated.timing(v, { toValue: 1, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(v, { toValue: 0, duration: dur, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ]));
-    const a = loop(drift1, 3800);
-    const b = loop(drift2, 5200);
-    a.start(); b.start();
-    return () => { a.stop(); b.stop(); };
-  }, [drift1, drift2]);
+    Animated.timing(scanGlow, {
+      toValue: scanState === "idle" ? 0 : 1,
+      duration: 240,
+      useNativeDriver: false,
+    }).start();
+  }, [scanState, scanGlow]);
 
   const enterChat = useCallback((seed?: string) => {
     const trimmed = seed?.trim();
@@ -203,7 +198,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
         protein: res.Protein,
         carbohydrates: res.Carbs,
         fats: res.Fat,
-        label: res.MealQuality,
+        label: "scan",
         createdAt: Date.now(),
         healthScore: res.HealthScoreOutOf10,
         oneEmoji: res.OneEmoji,
@@ -275,7 +270,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
       await Meal.createMeal(database, {
         userId, mealName: food.name, calories: food.calories, protein: food.protein,
         carbohydrates: food.carbs, fats: food.fats, label: "quick-add",
-        createdAt: Date.now(), healthScore: 0, oneEmoji: food.emoji,
+        createdAt: Date.now(), healthScore: food.health, oneEmoji: food.emoji,
       });
       bumpMeals();
       setText("");
@@ -318,11 +313,12 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   // Glow is fully invisible at rest — it only appears while overscrolling (the
   // bar growing) or when the input is focused for typing.
   const glowOpacity = Animated.add(
-    barStretch.interpolate({ inputRange: [0, 160], outputRange: [0, 1], extrapolate: "clamp" }),
-    focusGlow.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" })
+    Animated.add(
+      barStretch.interpolate({ inputRange: [0, 160], outputRange: [0, 1], extrapolate: "clamp" }),
+      focusGlow.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" })
+    ),
+    scanGlow
   );
-  const driftAX = drift1.interpolate({ inputRange: [0, 1], outputRange: [-26, 26] });
-  const driftBX = drift2.interpolate({ inputRange: [0, 1], outputRange: [22, -22] });
   const chatScaleY = chatAnim.interpolate({ inputRange: [0, 1], outputRange: [0.12, 1] });
   const chatScaleX = chatAnim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] });
   const chatContentOpacity = chatAnim.interpolate({ inputRange: [0, 0.45, 1], outputRange: [0, 0.15, 1] });
@@ -355,33 +351,25 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
         <LinearGradient colors={["rgba(0,0,0,0.9)", "rgba(0,0,0,0.5)", "transparent"]} locations={[0, 0.62, 1]} style={[StyleSheet.absoluteFill, { height: HEADER_H + 24 }]} pointerEvents="none" />
 
         {/* AI glow — soft colorful light, brightest at the top, fading to nothing
-            below the bar. Two radial blobs drift slowly so the colors keep moving.
-            Hidden at rest; shown while overscrolling or focused. */}
+            below the bar. Static (no drift). Hidden at rest; shown while
+            overscrolling or focused. */}
         <Animated.View pointerEvents="none" style={[st.glow, { height: GLOW_H, opacity: glowOpacity }]}>
-          <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: driftAX }] }]}>
-            <Svg width={SCREEN_W} height={GLOW_H}>
-              <Defs>
-                <RadialGradient id="askGlowA" cx="30%" cy="0%" r="82%">
-                  <Stop offset="0" stopColor="#AAFB05" stopOpacity={0.85} />
-                  <Stop offset="0.5" stopColor="#00D4FF" stopOpacity={0.32} />
-                  <Stop offset="1" stopColor="#00D4FF" stopOpacity={0} />
-                </RadialGradient>
-              </Defs>
-              <Rect width={SCREEN_W} height={GLOW_H} fill="url(#askGlowA)" />
-            </Svg>
-          </Animated.View>
-          <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: driftBX }] }]}>
-            <Svg width={SCREEN_W} height={GLOW_H}>
-              <Defs>
-                <RadialGradient id="askGlowB" cx="74%" cy="6%" r="82%">
-                  <Stop offset="0" stopColor="#A24BFF" stopOpacity={0.80} />
-                  <Stop offset="0.5" stopColor="#FF4B96" stopOpacity={0.30} />
-                  <Stop offset="1" stopColor="#FF4B96" stopOpacity={0} />
-                </RadialGradient>
-              </Defs>
-              <Rect width={SCREEN_W} height={GLOW_H} fill="url(#askGlowB)" />
-            </Svg>
-          </Animated.View>
+          <Svg width={SCREEN_W} height={GLOW_H}>
+            <Defs>
+              <RadialGradient id="askGlowA" cx="30%" cy="0%" r="82%">
+                <Stop offset="0" stopColor="#AAFB05" stopOpacity={0.85} />
+                <Stop offset="0.5" stopColor="#00D4FF" stopOpacity={0.32} />
+                <Stop offset="1" stopColor="#00D4FF" stopOpacity={0} />
+              </RadialGradient>
+              <RadialGradient id="askGlowB" cx="74%" cy="6%" r="82%">
+                <Stop offset="0" stopColor="#A24BFF" stopOpacity={0.80} />
+                <Stop offset="0.5" stopColor="#FF4B96" stopOpacity={0.30} />
+                <Stop offset="1" stopColor="#FF4B96" stopOpacity={0} />
+              </RadialGradient>
+            </Defs>
+            <Rect width={SCREEN_W} height={GLOW_H} fill="url(#askGlowA)" />
+            <Rect width={SCREEN_W} height={GLOW_H} fill="url(#askGlowB)" />
+          </Svg>
         </Animated.View>
 
         <Animated.View style={[st.askBar, { height: askBarHeight, borderRadius: askBarRadius, transform: [{ scale: pressScale }] }]}>
@@ -389,7 +377,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
             <Image source={AVATAR} style={{ width: "100%", height: "100%" }} />
           </TouchableOpacity>
 
-          <Pressable style={{ flex: 1, minWidth: 0, justifyContent: "center", alignSelf: "stretch" }} onPress={() => inputRef.current?.focus()}>
+          <Pressable style={{ flex: 1, minWidth: 0, justifyContent: "center", alignSelf: "stretch" }} onPress={() => { haptics.selection(); inputRef.current?.focus(); }}>
             <TextInput
               ref={inputRef}
               style={st.input}
@@ -463,7 +451,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
       )}
 
       {celebrate > 0 && (
-        <ConfettiCannon key={celebrate} count={18} origin={{ x: SCREEN_W / 2, y: 0 }} fadeOut autoStart explosionSpeed={350} fallSpeed={2600} />
+        <ConfettiCannon key={celebrate} count={70} origin={{ x: SCREEN_W / 2, y: 0 }} fadeOut autoStart explosionSpeed={420} fallSpeed={3000} />
       )}
     </>
   );

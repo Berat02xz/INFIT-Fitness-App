@@ -1,4 +1,4 @@
-import { schemaMigrations, createTable } from '@nozbe/watermelondb/Schema/migrations';
+import { schemaMigrations, createTable, unsafeExecuteSql } from '@nozbe/watermelondb/Schema/migrations';
 
 export const migrations = schemaMigrations({
   migrations: [
@@ -107,6 +107,13 @@ export const migrations = schemaMigrations({
             { name: 'saved_at', type: 'number', isIndexed: true },
           ],
         }),
+      ],
+    },
+    {
+      toVersion: 17,
+      steps: [
+        // Liked exercises feature removed — drop the now-unused table.
+        unsafeExecuteSql('DROP TABLE IF EXISTS liked_exercises;'),
       ],
     },
   ],

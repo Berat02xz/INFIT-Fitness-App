@@ -53,3 +53,21 @@ if (src.includes("componentDidUpdate = (prevProps) =>")) {
 
 fs.writeFileSync(filePath, src, "utf8");
 console.log("[patch-confetti] Successfully patched react-native-confetti-cannon.");
+
+// 4. Enlarge the confetti pieces (defaults 8–16 × 6–12 are tiny).
+const confettiPath = path.join(
+  __dirname,
+  "..",
+  "node_modules",
+  "react-native-confetti-cannon",
+  "src",
+  "components",
+  "confetti.js"
+);
+if (fs.existsSync(confettiPath)) {
+  let c = fs.readFileSync(confettiPath, "utf8");
+  c = c.replace("width: number = randomValue(8, 16);", "width: number = randomValue(16, 30);");
+  c = c.replace("height: number = randomValue(6, 12);", "height: number = randomValue(13, 24);");
+  fs.writeFileSync(confettiPath, c, "utf8");
+  console.log("[patch-confetti] Enlarged confetti pieces.");
+}

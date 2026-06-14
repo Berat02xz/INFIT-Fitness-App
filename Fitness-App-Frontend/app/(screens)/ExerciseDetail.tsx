@@ -14,8 +14,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/constants/theme";
 import { ExerciseApi, type ExerciseInfo } from "@/api/ExerciseApi";
-import { LikedExercise } from "@/models/LikedExercise";
-import database from "@/database/database";
 import FadeTranslate from "@/components/ui/FadeTranslate";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -61,26 +59,6 @@ export default function ExerciseDetail() {
     })();
   }, [params.exerciseId]);
 
-  const [isLiked, setIsLiked] = useState(false);
-
-  useEffect(() => {
-    if (params.exerciseId) {
-      LikedExercise.isLiked(database, params.exerciseId).then(setIsLiked);
-    }
-  }, [params.exerciseId]);
-
-  const handleToggleLike = async () => {
-    if (!params.exerciseId) return;
-    const liked = await LikedExercise.toggle(
-      database,
-      params.exerciseId,
-      exerciseInfo?.name || params.name || "Exercise",
-      exerciseInfo?.gifUrl || params.gifUrl || "",
-      params.category || exerciseInfo?.bodyParts?.[0] || "",
-    );
-    setIsLiked(liked);
-  };
-
   const imageUri = exerciseInfo?.gifUrl || params.gifUrl || null;
   const displayName = exerciseInfo?.name || params.name || "Exercise";
 
@@ -125,14 +103,6 @@ export default function ExerciseDetail() {
             activeOpacity={0.8}
           >
             <Ionicons name="chevron-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[s.likeBtn, { top: insets.top + 8, right: 24 }]}
-            onPress={handleToggleLike}
-            activeOpacity={0.8}
-          >
-            <Ionicons name={isLiked ? "heart" : "heart-outline"} size={22} color={isLiked ? "#ff4000" : "#FFF"} />
           </TouchableOpacity>
 
           {/* Render GIF */}
@@ -247,17 +217,6 @@ const s = StyleSheet.create({
   backBtn: {
     position: "absolute",
     left: 20,
-    zIndex: 10,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  likeBtn: {
-    position: "absolute",
-    right: 20,
     zIndex: 10,
     width: 40,
     height: 40,

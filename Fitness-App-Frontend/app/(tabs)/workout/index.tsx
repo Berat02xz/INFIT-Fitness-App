@@ -258,6 +258,17 @@ export default function Workout() {
     return [...list].sort((a, b) => (b.completions ?? 0) - (a.completions ?? 0));
   }, [workoutMode, activeFilter, savedIds]);
 
+  // Hide the "Your Routines" pill entirely until the user has saved a routine.
+  const visiblePills = useMemo(
+    () => (savedIds.size > 0 ? FILTER_PILLS : FILTER_PILLS.filter((p) => p !== "Your Routines")),
+    [savedIds]
+  );
+
+  // If the active filter vanishes (last saved routine removed), fall back to All.
+  useEffect(() => {
+    if (activeFilter === "Your Routines" && savedIds.size === 0) setActiveFilter("All");
+  }, [activeFilter, savedIds]);
+
   const switchFilter = useCallback((pill: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
     setActiveFilter(pill);
@@ -309,7 +320,7 @@ export default function Workout() {
 
         <FadeTranslate order={0} delay={140} direction="y" translateYFrom={12}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pillScroll}>
-            {FILTER_PILLS.map((pill) => (
+            {visiblePills.map((pill) => (
               <FilterPill key={pill} label={pill} active={activeFilter === pill} onPress={() => switchFilter(pill)} />
             ))}
           </ScrollView>

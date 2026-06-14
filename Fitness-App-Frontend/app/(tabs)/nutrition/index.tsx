@@ -17,6 +17,7 @@ import CalorieOrb from "@/components/ui/Nutrition/CalorieOrb";
 import MealBubbles, { type MealBubbleItem } from "@/components/ui/Nutrition/MealBubbles";
 import NutritionFocus from "@/components/ui/Nutrition/NutritionFocus";
 import EmojiDial, { EMOJI_DIAL_HEIGHT } from "@/components/ui/Nutrition/EmojiDial";
+import MealDetailOverlay from "@/components/ui/Nutrition/MealDetailOverlay";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -71,12 +72,23 @@ export default function NutritionScreen() {
 
   const [userData, setUserData] = useState<UserDTO | null>(null);
   const [todayMeals, setTodayMeals] = useState<Meal[]>([]);
+  const [recentScanned, setRecentScanned] = useState<Meal[]>([]);
+  const [dailyTotals, setDailyTotals] = useState<number[]>([]);
+  const [selectedMeal, setSelectedMeal] = useState<MealBubbleItem | null>(null);
+  const [selectedAuto, setSelectedAuto] = useState(false);
 
   // ── Data loading ──
   const refetchMeals = useCallback(async () => {
     const userId = await getUserIdFromToken();
     if (!userId) return;
-    setTodayMeals(await Meal.getTodayMeals(database, userId));
+    const [today, recents, daily] = await Promise.all([
+      Meal.getTodayMeals(database, userId),
+      Meal.getRecentScannedMeals(database, userId, 10),
+      Meal.getDailyCalorieTotals(database, userId, 30),
+    ]);
+    setTodayMeals(today);
+    setRecentScanned(recents);
+    setDailyTotals(daily);
   }, []);
 
   // Refetch when the shared ask bar adds a food elsewhere → a bubble pops in.
@@ -89,13 +101,9 @@ export default function NutritionScreen() {
       let isActive = true;
       (async () => {
         try {
-          const userId = await getUserIdFromToken();
           const user = await GetUserDetails();
           if (isActive) setUserData(user);
-          if (userId) {
-            const meals = await Meal.getTodayMeals(database, userId);
-            if (isActive) setTodayMeals(meals);
-          }
+          await refetchMeals();
         } catch (e) {
           console.error(e);
         }
@@ -103,7 +111,7 @@ export default function NutritionScreen() {
       return () => {
         isActive = false;
       };
-    }, [])
+    }, [refetchMeals])
   );
 
   // ── Delete a logged meal (dragged into the bin) ──
@@ -135,7 +143,7 @@ export default function NutritionScreen() {
           fats: food.fats,
           label: "quick-add",
           createdAt: Date.now(),
-          healthScore: 0,
+          healthScore: food.health,
           oneEmoji: food.emoji,
         });
         haptics.success();
@@ -160,9 +168,7 @@ export default function NutritionScreen() {
 
   const targetCalories = userData?.caloricIntake || 2000;
   const isOver = totals.calories > targetCalories;
-  const caloriesDisplay = isOver
-    ? Math.round(totals.calories - targetCalories)
-    : Math.round(targetCalories - totals.calories);
+  const consumed = Math.round(totals.calories);
   const progress = targetCalories > 0 ? totals.calories / targetCalories : 0;
   // "On track" lights the single green accent in the header: meaningfully into
   // the day's target but not yet over it.
@@ -176,9 +182,31 @@ export default function NutritionScreen() {
   );
 
   const bubbleMeals: MealBubbleItem[] = useMemo(
-    () => todayMeals.map((m) => ({ id: String(m.id), emoji: m.oneEmoji ?? "🍽️" })),
+    () =>
+      todayMeals.map((m) => ({
+        id: String(m.id),
+        emoji: m.oneEmoji ?? "🍽️",
+        name: m.mealName,
+        calories: m.calories,
+        health: m.healthScore,
+      })),
     [todayMeals]
   );
+
+  // The dial shows recent scanned meals (on the left) then the curated foods.
+  const dialFoods: FoodItem[] = useMemo(() => {
+    const recents: FoodItem[] = recentScanned.map((m) => ({
+      id: `recent_${m.id}`,
+      emoji: m.oneEmoji ?? "🍽️",
+      name: m.mealName,
+      calories: m.calories,
+      protein: m.protein,
+      carbs: m.carbohydrates,
+      fats: m.fats,
+      health: m.healthScore,
+    }));
+    return [...recents, ...DIAL_FOODS];
+  }, [recentScanned]);
 
   // ── Layout geometry ──
   // Lift the dial above the floating tab bar (dock height 72 + its bottom offset)
@@ -194,9 +222,6 @@ export default function NutritionScreen() {
   const canvasCenterY = headerBottom + (dialTop - headerBottom) * 0.42;
   // A larger, refined ring radius (thin strokes carry the elegance, not bulk).
   const ORB_SIZE = Math.min(SCREEN_W * 0.7, 286);
-  // Trash zone center: low-center, just above the dial so the big drop circle
-  // never collides with the dial or the floating tab bar.
-  const binY = dialTop - 104;
 
   return (
     <View style={styles.container}>
@@ -213,32 +238,42 @@ export default function NutritionScreen() {
         centerY={canvasCenterY}
       />
 
-      {/* Draggable, springy meal-emoji bubbles (the simulation) */}
-      <MealBubbles
-        meals={bubbleMeals}
-        centerX={canvasCenterX}
-        centerY={canvasCenterY}
-        binY={binY}
-        onDelete={deleteMeal}
-      />
-
       {/* Top-left stat header: calorie number + macros + motivation */}
       <View style={[styles.topWrap, { paddingTop: insets.top + 78 }]} pointerEvents="box-none">
         <NutritionFocus
-          caloriesValue={caloriesDisplay}
+          consumed={consumed}
+          target={targetCalories}
           isOver={isOver}
           onTrack={onTrack}
           protein={totals.protein}
           carbs={totals.carbs}
           fats={totals.fats}
           motivation={motivation}
+          days={dailyTotals}
         />
       </View>
 
       {/* Bottom emoji dial — lifted clear of the floating tab bar */}
       <View style={[styles.dialWrap, { bottom: dialBottom }]} pointerEvents="box-none">
-        <EmojiDial foods={DIAL_FOODS} onPick={logFood} />
+        <EmojiDial foods={dialFoods} onPick={logFood} />
       </View>
+
+      {/* Draggable meal-emoji bubbles + the big bottom bin — rendered above the
+          dial so the bin shows and a dragged emoji floats over everything. */}
+      <MealBubbles
+        meals={bubbleMeals}
+        centerX={canvasCenterX}
+        centerY={canvasCenterY}
+        onDelete={deleteMeal}
+        onSelect={(m) => { setSelectedMeal(m); setSelectedAuto(true); }}
+        onPreview={(m) => { setSelectedMeal(m); setSelectedAuto(false); }}
+        onPreviewClose={() => setSelectedMeal(null)}
+      />
+
+      {/* Tap a logged emoji → blurred detail (name · kcal · health) */}
+      {selectedMeal && (
+        <MealDetailOverlay meal={selectedMeal} autoClose={selectedAuto} onClose={() => setSelectedMeal(null)} />
+      )}
     </View>
   );
 }

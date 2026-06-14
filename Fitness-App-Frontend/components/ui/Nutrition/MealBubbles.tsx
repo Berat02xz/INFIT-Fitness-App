@@ -1,7 +1,6 @@
 import { haptics } from "@/utils/haptics";
-import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Dimensions, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   interpolate,
@@ -14,84 +13,84 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 
-// ─── Meal bubbles (simulation layer) ─────────────────────────────────────────
-// A playful, springy cluster of meal-emoji "bubbles" floating around a center
-// point. Each logged meal is just a LARGE borderless emoji. Bubbles pop in on
-// mount, do a fast snappy pop on tap, and can be DRAGGED immediately on a small
-// finger movement (no long-press hold). While dragging, a big trash zone fades
-// in low-center: release over it to delete the meal (emoji is hurled away),
-// otherwise the bubble springs back to its cluster spot. Taps pass through the
-// empty gaps (the container is box-none).
+import FoodEmoji from "./FoodEmoji";
 
-export type MealBubbleItem = { id: string; emoji: string };
+// Relative require (not the @/ alias) so Metro resolves the asset reliably.
+const BIN_IMG = require("../../../assets/icons/recycle_bin_00000.png");
+
+// ─── Meal bubbles (simulation layer) ─────────────────────────────────────────
+// A playful, springy cluster of logged meal emojis floating around a center
+// point. They pop in on mount, can be DRAGGED immediately (small movement),
+// HOLD to preview the meal detail (kept until release), or quick-TAP to open the
+// detail persistently. While dragging, a big recycle-bin rises from the bottom —
+// drop a meal onto it (drag to the bottom) to delete it; otherwise it gravitates
+// back to its cluster spot. Taps pass through the empty gaps (box-none).
+
+export type MealBubbleItem = {
+  id: string;
+  emoji: string;
+  name: string;
+  calories: number;
+  health: number;
+};
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 // Touch box around each (large) emoji — generous so the finger lands easily.
-const SIZE = 78;
+const SIZE = 84;
 const EMOJI_SIZE = 50;
 
-// ─── Big trash zone geometry (absolute screen coords) ───────────────────────
-// A large circle low-center. Sized off screen width so it reads as a prominent
-// drop target, and positioned clear of the dial / floating tab bar.
-const BIN_SIZE = Math.min(SCREEN_W * 0.42, 184);
-const BIN_CX = SCREEN_W / 2;
-// Default low-center; the parent may override via `binY`.
-const BIN_CY_DEFAULT = SCREEN_H * 0.72;
-// The finger only needs to be within this radius (a bit beyond the circle's
-// own edge) to arm a delete.
-const BIN_HIT_RADIUS = BIN_SIZE / 2 + 28;
+// ─── Recycle-bin drop target (bottom of screen) ─────────────────────────────
+// The transparent bin image, full screen width, pushed mostly off the bottom so
+// only ~40% of its top shows. No background / border. Rises while dragging.
+const BIN_W = SCREEN_W;
+const BIN_PEEK = 0.55; // fraction of the image hidden below the screen (top ~45% shows)
+// How far down the dragged emoji must reach (absolute Y) to arm a delete.
+const BIN_ARM_Y = SCREEN_H - 190;
 
 // Golden-angle radial packing makes the cluster read as natural, not a ring.
 const GOLDEN = 2.399963;
 
 type Offset = { x: number; y: number };
 
-// Deterministic resting offset for a bubble at `index` within `total` bubbles.
 function restingOffset(index: number, total: number): Offset {
-  if (total <= 1) {
-    return { x: 0, y: 0 };
-  }
+  if (total <= 1) return { x: 0, y: 0 };
   const angle = index * GOLDEN;
   const jitter = ((index * 53) % 19) - 9;
-  const radius = 40 + Math.min(index, 9) * 18 + jitter;
-  return {
-    x: Math.cos(angle) * radius,
-    y: Math.sin(angle) * radius,
-  };
+  const radius = 42 + Math.min(index, 9) * 19 + jitter;
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
 }
 
-// Shared drag state, owned by the parent and threaded to every bubble + the bin
-// so the bin can react live to whichever bubble is currently being dragged.
+// Shared drag state, owned by the parent and threaded to every bubble + the bin.
 type DragState = {
-  active: SharedValue<number>; // 1 while any bubble is being dragged
-  overBin: SharedValue<number>; // 1 while the dragged bubble is over the bin
+  active: SharedValue<number>;
+  overBin: SharedValue<number>;
 };
 
 type MealBubbleProps = {
-  id: string;
-  emoji: string;
+  item: MealBubbleItem;
   index: number;
   total: number;
   centerX: number;
   centerY: number;
-  binCY: number;
   drag: DragState;
   onDelete: (id: string) => void;
+  onSelect: (item: MealBubbleItem) => void;
+  onPreview: (item: MealBubbleItem) => void;
+  onPreviewClose: () => void;
 };
 
-// One component instance per meal id keeps hooks stable per bubble — never call
-// hooks in a loop in the parent.
 function MealBubble({
-  id,
-  emoji,
+  item,
   index,
   total,
   centerX,
   centerY,
-  binCY,
   drag,
   onDelete,
+  onSelect,
+  onPreview,
+  onPreviewClose,
 }: MealBubbleProps) {
   const rest = useMemo(() => restingOffset(index, total), [index, total]);
 
@@ -99,24 +98,23 @@ function MealBubble({
   const ty = useSharedValue(rest.y);
   const scale = useSharedValue(0);
   const dragging = useSharedValue(0);
+  const previewing = useSharedValue(0);
 
   // Pop-in on mount.
   useEffect(() => {
     scale.value = withSpring(1, { damping: 9, stiffness: 170, mass: 0.6 });
   }, [scale]);
 
-  // Ease toward the (possibly shifted) resting position when the layout
-  // changes — but never fight an in-progress drag.
+  // Ease toward the resting position when the layout changes (not while dragging).
   useEffect(() => {
     if (dragging.value === 1) return;
     tx.value = withSpring(rest.x, { damping: 11, stiffness: 90, mass: 0.9 });
     ty.value = withSpring(rest.y, { damping: 11, stiffness: 90, mass: 0.9 });
   }, [rest.x, rest.y, dragging, tx, ty]);
 
-  // Drag: activates on a tiny finger movement (no long-press). minDistance keeps
-  // a still finger free for the Tap gesture below.
+  // Drag — immediate (small movement), no long-press needed.
   const pan = Gesture.Pan()
-    .minDistance(4)
+    .minDistance(10)
     .onStart(() => {
       dragging.value = 1;
       drag.active.value = 1;
@@ -126,11 +124,8 @@ function MealBubble({
     .onUpdate((e) => {
       tx.value = rest.x + e.translationX;
       ty.value = rest.y + e.translationY;
-      // Bubble center in absolute screen space.
-      const cx = centerX + tx.value;
       const cy = centerY + ty.value;
-      const dist = Math.hypot(cx - BIN_CX, cy - binCY);
-      drag.overBin.value = dist < BIN_HIT_RADIUS ? 1 : 0;
+      drag.overBin.value = cy > BIN_ARM_Y ? 1 : 0;
     })
     .onEnd(() => {
       dragging.value = 0;
@@ -139,34 +134,50 @@ function MealBubble({
       drag.overBin.value = 0;
 
       if (wasOverBin) {
-        // Hurled into the bin: shrink & fall away, then remove the meal.
         runOnJS(haptics.success)();
-        ty.value = withTiming(ty.value + 110, { duration: 260 });
+        ty.value = withTiming(ty.value + 130, { duration: 260 });
         scale.value = withTiming(0, { duration: 240 }, (finished) => {
-          if (finished) runOnJS(onDelete)(id);
+          if (finished) runOnJS(onDelete)(item.id);
         });
         return;
       }
 
-      // Not over the bin — gravitate back to the cluster spot.
       tx.value = withSpring(rest.x, { damping: 12, stiffness: 110, mass: 0.8 });
       ty.value = withSpring(rest.y, { damping: 12, stiffness: 110, mass: 0.8 });
       scale.value = withSpring(1, { damping: 12, stiffness: 200, mass: 0.6 });
     });
 
-  // Fast, snappy pop on tap — two very stiff springs, short and punchy.
+  // Hold to preview — opens the detail and keeps it until release.
+  const longPress = Gesture.LongPress()
+    .minDuration(180)
+    .maxDistance(16)
+    .onStart(() => {
+      previewing.value = 1;
+      runOnJS(haptics.light)();
+      runOnJS(onPreview)(item);
+      scale.value = withSpring(1.16, { damping: 12, stiffness: 220, mass: 0.6 });
+    })
+    .onFinalize(() => {
+      if (previewing.value === 1) {
+        previewing.value = 0;
+        runOnJS(onPreviewClose)();
+        scale.value = withSpring(1, { damping: 12, stiffness: 220, mass: 0.6 });
+      }
+    });
+
+  // Quick tap — punchy pop + open the detail persistently.
   const tap = Gesture.Tap()
-    .maxDuration(220)
+    .maxDuration(170)
     .onStart(() => {
       runOnJS(haptics.light)();
+      runOnJS(onSelect)(item);
       scale.value = withSequence(
         withSpring(1.42, { damping: 9, stiffness: 650, mass: 0.4 }),
         withSpring(1, { damping: 14, stiffness: 520, mass: 0.4 })
       );
     });
 
-  // Race: a quick tap pops; any drag movement wins and moves the emoji.
-  const gesture = Gesture.Race(pan, tap);
+  const gesture = Gesture.Race(pan, longPress, tap);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
@@ -174,7 +185,7 @@ function MealBubble({
       { translateY: ty.value },
       { scale: scale.value },
     ],
-    zIndex: dragging.value === 1 ? 10 : 1,
+    zIndex: dragging.value === 1 || previewing.value === 1 ? 10 : 1,
   }));
 
   return (
@@ -186,67 +197,32 @@ function MealBubble({
           animatedStyle,
         ]}
       >
-        <Text style={styles.emoji} allowFontScaling={false}>
-          {emoji}
-        </Text>
+        <FoodEmoji emoji={item.emoji} size={EMOJI_SIZE} />
       </Animated.View>
     </GestureDetector>
   );
 }
 
-// ─── Big trash zone ──────────────────────────────────────────────────────────
-// Fades & scales in only while a bubble is being dragged; grows and turns
-// red-tinted while the dragged bubble hovers over it. Prominent, low-center.
-function TrashZone({ drag, binCY }: { drag: DragState; binCY: number }): React.JSX.Element {
-  const containerStyle = useAnimatedStyle(() => ({
+// ─── Big recycle-bin image at the bottom ─────────────────────────────────────
+function BinImage({ drag }: { drag: DragState }): React.JSX.Element {
+  const wrapStyle = useAnimatedStyle(() => ({
     opacity: withTiming(drag.active.value, { duration: 160 }),
     transform: [
-      {
-        scale: withTiming(interpolate(drag.active.value, [0, 1], [0.78, 1]), {
-          duration: 180,
-        }),
-      },
+      { translateY: withTiming(interpolate(drag.active.value, [0, 1], [80, 0]), { duration: 220 }) },
     ],
   }));
 
-  const circleStyle = useAnimatedStyle(() => ({
+  const imgStyle = useAnimatedStyle(() => ({
     transform: [
-      { scale: withSpring(drag.overBin.value === 1 ? 1.12 : 1, { damping: 14, stiffness: 220 }) },
+      { scale: withSpring(drag.overBin.value === 1 ? 1.06 : 1, { damping: 14, stiffness: 200 }) },
+      { translateY: withSpring(drag.overBin.value === 1 ? -16 : 0, { damping: 14, stiffness: 200 }) },
     ],
-    backgroundColor:
-      drag.overBin.value === 1 ? "rgba(255,69,58,0.16)" : "rgba(255,255,255,0.04)",
-    borderColor:
-      drag.overBin.value === 1 ? "rgba(255,69,58,0.9)" : "rgba(255,255,255,0.14)",
-  }));
-
-  const iconStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: withSpring(drag.overBin.value === 1 ? 1.16 : 1, { damping: 14, stiffness: 220 }) },
-    ],
-    opacity: drag.overBin.value === 1 ? 1 : 0.65,
-  }));
-
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: drag.overBin.value === 1 ? 1 : 0.5,
+    opacity: interpolate(drag.overBin.value, [0, 1], [0.82, 1]),
   }));
 
   return (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        styles.binWrap,
-        { left: BIN_CX - BIN_SIZE / 2, top: binCY - BIN_SIZE / 2 },
-        containerStyle,
-      ]}
-    >
-      <Animated.View style={[styles.binCircle, circleStyle]}>
-        <Animated.View style={iconStyle}>
-          <Ionicons name="trash-outline" size={BIN_SIZE * 0.28} color="#FF453A" />
-        </Animated.View>
-        <Animated.Text style={[styles.binLabel, labelStyle]} allowFontScaling={false}>
-          Drop to remove
-        </Animated.Text>
-      </Animated.View>
+    <Animated.View pointerEvents="none" style={[styles.binWrap, wrapStyle]}>
+      <Animated.Image source={BIN_IMG} resizeMode="contain" style={[styles.binImg, imgStyle]} />
     </Animated.View>
   );
 }
@@ -255,12 +231,12 @@ export default function MealBubbles(props: {
   meals: MealBubbleItem[];
   centerX: number;
   centerY: number;
-  /** Absolute Y (from screen top) for the trash zone center — low-center default. */
-  binY?: number;
   onDelete: (id: string) => void;
+  onSelect: (item: MealBubbleItem) => void;
+  onPreview: (item: MealBubbleItem) => void;
+  onPreviewClose: () => void;
 }): React.JSX.Element {
-  const { meals, centerX, centerY, onDelete } = props;
-  const binCY = props.binY ?? BIN_CY_DEFAULT;
+  const { meals, centerX, centerY, onDelete, onSelect, onPreview, onPreviewClose } = props;
 
   const active = useSharedValue(0);
   const overBin = useSharedValue(0);
@@ -268,20 +244,20 @@ export default function MealBubbles(props: {
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* Bin sits below the bubbles so a dragged emoji floats above it. */}
-      <TrashZone drag={drag} binCY={binCY} />
+      <BinImage drag={drag} />
       {meals.map((meal, index) => (
         <MealBubble
           key={meal.id}
-          id={meal.id}
-          emoji={meal.emoji}
+          item={meal}
           index={index}
           total={meals.length}
           centerX={centerX}
           centerY={centerY}
-          binCY={binCY}
           drag={drag}
           onDelete={onDelete}
+          onSelect={onSelect}
+          onPreview={onPreview}
+          onPreviewClose={onPreviewClose}
         />
       ))}
     </View>
@@ -296,30 +272,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: {
-    fontSize: EMOJI_SIZE,
-  },
   binWrap: {
     position: "absolute",
-    width: BIN_SIZE,
-    height: BIN_SIZE,
+    left: 0,
+    right: 0,
+    bottom: -BIN_W * BIN_PEEK,
     alignItems: "center",
-    justifyContent: "center",
   },
-  binCircle: {
-    width: BIN_SIZE,
-    height: BIN_SIZE,
-    borderRadius: BIN_SIZE / 2,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  binLabel: {
-    marginTop: 10,
-    fontSize: 12,
-    letterSpacing: 0.4,
-    color: "#FF453A",
-    fontFamily: "Bold",
+  binImg: {
+    width: BIN_W,
+    height: BIN_W,
   },
 });

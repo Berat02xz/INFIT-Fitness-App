@@ -22,7 +22,6 @@ import { ExerciseApi, type ExerciseInfo } from "../../api/ExerciseApi";
 import FadeTranslate from "../../components/ui/FadeTranslate";
 import { theme } from "../../constants/theme";
 import WorkoutComplete from "../../components/ui/WorkoutComplete";
-import { LikedExercise } from "../../models/LikedExercise";
 import { WorkoutLog } from "../../models/WorkoutLog";
 import { User } from "../../models/User";
 import { getUserIdFromToken } from "../../api/TokenDecoder";
@@ -143,7 +142,6 @@ export default function WorkoutPlayer() {
   const [exerciseTimer, setExerciseTimer] = useState<number>(getExerciseDuration(currentExercise));
   const [isPaused, setIsPaused] = useState(false);
   const [totalElapsed, setTotalElapsed] = useState(0);
-  const [isLiked, setIsLiked] = useState(false);
   const [exerciseInfo, setExerciseInfo] = useState<ExerciseInfo | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
   const [userInitials, setUserInitials] = useState("");
@@ -173,10 +171,9 @@ export default function WorkoutPlayer() {
       .catch(() => {});
   }, []);
 
-  // Fetch exercise info & check like status when exercise changes
+  // Fetch exercise info when exercise changes
   useEffect(() => {
     if (currentExercise?.exerciseId) {
-      LikedExercise.isLiked(database, currentExercise.exerciseId).then(setIsLiked);
       setInfoLoading(true);
       setExerciseInfo(null);
       ExerciseApi.getExerciseById(currentExercise.exerciseId)
@@ -185,18 +182,6 @@ export default function WorkoutPlayer() {
         .finally(() => setInfoLoading(false));
     }
   }, [currentIndex]);
-
-  const handleToggleLike = async () => {
-    if (!currentExercise) return;
-    const liked = await LikedExercise.toggle(
-      database,
-      currentExercise.exerciseId,
-      currentExercise.name,
-      currentExercise.gifUrl || "",
-      currentExercise.category || "",
-    );
-    setIsLiked(liked);
-  };
 
   // Bottom Sheet
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -896,9 +881,7 @@ export default function WorkoutPlayer() {
 
                 {/* Swipe up hint + side actions */}
                 <View style={[styles.hintRow, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-                  <Pressable onPress={handleToggleLike} style={styles.sideActionBtn} hitSlop={6}>
-                    <Ionicons name={isLiked ? "heart" : "heart-outline"} size={18} color={isLiked ? "#ff4757" : C.dim} />
-                  </Pressable>
+                  <View style={styles.sideActionBtn} />
                   <Pressable onPress={() => handleOpenSheet("instruction")} style={styles.hintCenter}>
                     <Animated.View style={{ transform: [{ translateY: hintBounce.interpolate({ inputRange: [0, 1], outputRange: [3, -3] }) }] }}>
                       <Ionicons name="chevron-up" size={16} color={D.primary} />

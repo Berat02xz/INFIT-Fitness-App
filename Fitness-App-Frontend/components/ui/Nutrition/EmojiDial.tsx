@@ -1,7 +1,8 @@
 import { theme } from "@/constants/theme";
 import type { FoodItem } from "@/constants/foods";
 import { haptics } from "@/utils/haptics";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import FoodEmoji from "./FoodEmoji";
+import React, { useCallback, useEffect, useState } from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -32,15 +33,14 @@ const { width: SCREEN_W } = Dimensions.get("window");
 const WHEEL_R = SCREEN_W * 1.55;
 // Angular gap between adjacent emojis (radians from the wheel center). Smaller
 // → emojis sit closer along the arc.
-const STEP = 0.205;
+const STEP = 0.17;
 // How many items to render on each side of the focused one. Beyond this the
 // emoji has curved too far down/away to matter — keeps the DOM light.
-const VISIBLE_SIDE = 4;
+const VISIBLE_SIDE = 5;
 
 // ── Item sizing ──
 const FOCUS_CIRCLE = 74; // focused (top-dead-center) round button
 const FOCUS_EMOJI = 42; // single emoji at focus
-const FOCUS_COMBO = 28; // each glyph when two are stacked at focus
 
 // ── Component layout ──
 const ARC_AREA_H = 116; // vertical band the arc of emojis occupies
@@ -62,32 +62,6 @@ const C = {
   captionDot: "rgba(255,255,255,0.30)",
   captionKcal: theme.primary,
 } as const;
-
-// ─── Emoji content (single or stacked combo) ─────────────────────────────────
-function EmojiContent({ emoji }: { emoji: string }): React.JSX.Element {
-  // A combo food encodes two foods in one string (e.g. "🥩🍚"). Split on real
-  // glyph boundaries and stack them as a little overlapped "plate" of two.
-  const glyphs = useMemo(() => Array.from(emoji), [emoji]);
-
-  if (glyphs.length >= 2) {
-    return (
-      <View style={styles.combo}>
-        <Text style={[styles.comboEmoji, styles.comboBack]} allowFontScaling={false}>
-          {glyphs[0]}
-        </Text>
-        <Text style={[styles.comboEmoji, styles.comboFront]} allowFontScaling={false}>
-          {glyphs[1]}
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <Text style={styles.emoji} allowFontScaling={false}>
-      {emoji}
-    </Text>
-  );
-}
 
 // ─── Single wheel item ───────────────────────────────────────────────────────
 interface WheelItemProps {
@@ -139,7 +113,7 @@ function WheelItem({ food, index, rotation, onTap }: WheelItemProps) {
     <GestureDetector gesture={tap}>
       <Animated.View style={[styles.item, animatedStyle]}>
         <View style={styles.circle}>
-          <EmojiContent emoji={food.emoji} />
+          <FoodEmoji emoji={food.emoji} size={FOCUS_EMOJI} />
         </View>
       </Animated.View>
     </GestureDetector>
@@ -162,11 +136,12 @@ export default function EmojiDial({
 }: EmojiDialProps) {
   const lastIndex = Math.max(foods.length - 1, 0);
 
-  // Continuous rotation in item units; integer-rounded → focused index.
-  const rotation = useSharedValue(0);
+  // Continuous rotation in item units; integer-rounded → focused index. Start at
+  // item 1 so there's always at least one item to the left of the focused one.
+  const rotation = useSharedValue(1);
   const start = useSharedValue(0);
 
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(1);
 
   // React-side updates as the focused item changes (caption + haptics + cb).
   const onFocusChange = useCallback(
@@ -282,26 +257,6 @@ const styles = StyleSheet.create({
     backgroundColor: C.circleFill,
     alignItems: "center",
     justifyContent: "center",
-  },
-  emoji: {
-    fontSize: FOCUS_EMOJI,
-    textAlign: "center",
-  },
-  combo: {
-    width: FOCUS_CIRCLE,
-    height: FOCUS_CIRCLE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  comboEmoji: {
-    position: "absolute",
-    fontSize: FOCUS_COMBO,
-  },
-  comboBack: {
-    transform: [{ translateX: -10 }, { translateY: -7 }, { rotate: "-14deg" }],
-  },
-  comboFront: {
-    transform: [{ translateX: 10 }, { translateY: 7 }, { rotate: "13deg" }],
   },
   caption: {
     fontSize: 14,
