@@ -67,14 +67,14 @@ const CONTEXT_OPTIONS = [
   {
     key: "workout" as const,
     icon: "barbell-outline",
-    label: "Recent workouts",
-    description: "Completed routines and training activity",
+    label: "This week's workouts",
+    description: "Routine names and muscles trained this week",
   },
   {
     key: "nutrition" as const,
     icon: "nutrition-outline",
     label: "Nutrition",
-    description: "Recent meals, calories, and macros",
+    description: "This week's meal names, daily calories, and calorie plan",
   },
 ] as const;
 
@@ -313,6 +313,7 @@ export default function Chatbot({ onRequestClose, initialMessage }: ChatbotProps
               style={st.ctxTextBtn}
               onPress={toggleContextPicker}
               activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Text style={st.ctxText}>
                 <Text style={st.ctxInclude}>Include </Text>
@@ -635,7 +636,11 @@ const st = StyleSheet.create({
     flex: 1, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.55)",
   },
-  ctxTextBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+  ctxTextBtn: {
+    minHeight: 44,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 8, marginLeft: -8,
+  },
   ctxText: { fontFamily: theme.medium, fontSize: 14, color: "#636366" },
   ctxInclude: { fontFamily: theme.bold, color: "#FFFFFF" },
   ctxDropdown: {

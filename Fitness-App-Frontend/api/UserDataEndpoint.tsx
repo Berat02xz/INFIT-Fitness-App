@@ -8,6 +8,7 @@ import  UserDTO  from '@/models/DTO/UserDTO';
 import { Meal } from '@/models/Meals';
 import { MealEndpoint } from './MealEndpoint';
 import { clearExpoGoActivity } from '@/database/expoGoActivityPersistence';
+import { normalizeMealEmojis } from '@/utils/mealEmojis';
 
 export const RegisterUser = async (userData: {
   Name: string;
@@ -247,7 +248,9 @@ export const FetchUserMealsAndStore = async (userId: string) => {
           label: backendMeal.Label || backendMeal.label || '',
           createdAt: backendMeal.CreatedAt || backendMeal.createdAt || Date.now(),
           healthScore: backendMeal.HealthScore || backendMeal.healthScore || 0,
-          oneEmoji: backendMeal.OneEmoji || backendMeal.oneEmoji || '🍽️',
+          oneEmoji: normalizeMealEmojis(
+            backendMeal.Emojis || backendMeal.emojis || backendMeal.OneEmoji || backendMeal.oneEmoji
+          ),
         });
         successCount++;
       } catch (mealError) {

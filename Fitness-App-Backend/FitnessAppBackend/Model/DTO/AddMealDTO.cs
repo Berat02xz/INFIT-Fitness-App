@@ -10,6 +10,8 @@
         public int Fats { get; set; }
         public int HealthScoreOutOf10 { get; set; }
         public string MealQuality { get; set; }
+        public List<string> Emojis { get; set; } = [];
+        public string? OneEmoji { get; set; }
 
     }
 }

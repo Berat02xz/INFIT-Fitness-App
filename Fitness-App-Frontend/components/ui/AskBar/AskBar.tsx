@@ -35,6 +35,7 @@ import SettingsIsland from "./SettingsIsland";
 import Chatbot from "@/app/(screens)/Chatbot";
 import ChatIsland from "./ChatIsland";
 import UserProfileCard, { PROFILE_CARD_HEIGHT } from "@/components/ui/Profile/UserProfileCard";
+import { normalizeMealEmojis } from "@/utils/mealEmojis";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const H_PAD = 18;
@@ -55,7 +56,10 @@ type MealScanResult = {
   Fat: number;
   MealQuality: string;
   HealthScoreOutOf10: number;
-  OneEmoji: string;
+  Emojis?: string[];
+  emojis?: string[];
+  OneEmoji?: string;
+  oneEmoji?: string;
 };
 
 const ASK_PHRASES: Record<Tab, string[]> = {
@@ -281,7 +285,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
         label: "scan",
         createdAt: Date.now(),
         healthScore: res.HealthScoreOutOf10,
-        oneEmoji: res.OneEmoji,
+        oneEmoji: normalizeMealEmojis(res.Emojis ?? res.emojis ?? res.OneEmoji ?? res.oneEmoji),
       });
       bumpMeals();
       haptics.success();

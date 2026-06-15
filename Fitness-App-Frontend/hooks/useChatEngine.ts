@@ -9,6 +9,11 @@ import { getUserIdFromToken } from "@/api/TokenDecoder";
 import { AIEndpoint } from "@/api/AIEndpoint";
 import { SavedMessage } from "@/models/SavedMessage";
 import { haptics } from "@/utils/haptics";
+import {
+  computeWeeklyMuscleActivity,
+  MUSCLE_KEYS,
+  MUSCLE_LABELS,
+} from "@/utils/MuscleActivity";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,33 +62,13 @@ function detectCategory(text: string): "nutrition" | "fitness" | "general" {
   return "general";
 }
 
-async function getContextualData(cat: "nutrition" | "fitness" | "general") {
+async function getContextualData(cat: "nutrition" | "fitness" | "general"): Promise<string | null> {
   if (cat === "general") return null;
   try {
-    const userId = await getUserIdFromToken();
-    if (!userId) return null;
-    const user = await GetUserDetails();
-    if (cat === "nutrition") {
-      const meals = await Meal.getTodayMeals(database, userId);
-      const totalCal = meals.reduce((s, m) => s + m.calories, 0);
-      return {
-        userWeight: user?.weight, userHeight: user?.height, bmr: user?.bmr,
-        dailyCalorieGoal: user?.caloricIntake,
-        caloriesConsumedToday: totalCal,
-        caloriesRemaining: (user?.caloricIntake || 0) - totalCal,
-        proteinToday: Math.round(meals.reduce((s, m) => s + m.protein, 0)),
-        carbsToday: Math.round(meals.reduce((s, m) => s + m.carbohydrates, 0)),
-        fatsToday: Math.round(meals.reduce((s, m) => s + m.fats, 0)),
-        mealsToday: meals.length,
-        mealsList: meals.map((m) => m.mealName).join(", "),
-        goal: user?.goal, activityLevel: user?.activityLevel, unit: user?.unit,
-      };
-    }
-    return {
-      userWeight: user?.weight, userHeight: user?.height, goal: user?.goal,
-      fitnessLevel: user?.fitnessLevel, activityLevel: user?.activityLevel,
-      equipmentAccess: user?.equipmentAccess, bmr: user?.bmr, unit: user?.unit,
-    };
+    const context = cat === "nutrition"
+      ? await buildNutritionContext()
+      : await buildWorkoutContext();
+    return context || null;
   } catch (e) {
     console.error("ChatEngine context fetch", e);
     return null;
@@ -92,23 +77,32 @@ async function getContextualData(cat: "nutrition" | "fitness" | "general") {
 
 // ─── Manual context builders (used by Chatbot screen's context selector) ──────
 
+function startOfCurrentWeek(): Date {
+  const now = new Date();
+  const daysSinceMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(now.getDate() - daysSinceMonday);
+  return monday;
+}
+
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export async function buildUserContext(): Promise<string> {
   try {
     const user = await GetUserDetails();
     if (!user) return "";
     return [
-      `Name: ${user.name}`,
-      `Age: ${user.age}`,
-      `Gender: ${user.gender}`,
-      `Weight: ${user.weight}${user.unit === "metric" ? "kg" : "lbs"}`,
-      `Height: ${user.height}${user.unit === "metric" ? "cm" : "in"}`,
-      `BMI: ${Number(user.bmi || 0).toFixed(1)}`,
-      `Goal: ${user.goal}`,
-      `Calorie Target: ${user.caloricIntake} kcal/day`,
-      `Fitness Level: ${user.fitnessLevel}`,
-      `Equipment: ${user.equipmentAccess}`,
-      `Activity Level: ${user.activityLevel}`,
-    ].join(", ");
+      "USER PROFILE",
+      `Goal: ${user.goal || "Not set"}`,
+      `Stats: ${user.age || "unknown"} years, ${user.gender || "unspecified"}, ${user.weight || "unknown"}${user.unit === "metric" ? "kg" : "lbs"}, ${user.height || "unknown"}${user.unit === "metric" ? "cm" : "in"}`,
+      `Training: ${user.fitnessLevel || "unspecified"} level, ${user.activityLevel || "unspecified"} activity, equipment: ${user.equipmentAccess || "unspecified"}`,
+    ].join("\n");
   } catch { return ""; }
 }
 
@@ -116,16 +110,23 @@ export async function buildWorkoutContext(): Promise<string> {
   try {
     const userId = await getUserIdFromToken();
     if (!userId) return "";
-    const endMs = Date.now();
-    const startMs = endMs - 30 * 24 * 60 * 60 * 1000;
-    const logs = await WorkoutLog.logsInRange(database, userId, startMs, endMs);
-    const recent = logs.sort((a, b) => b.completedAt - a.completedAt).slice(0, 5);
-    if (recent.length === 0) return "No workouts logged in the past 30 days.";
-    const lines = recent.map((l) => {
-      const date = new Date(l.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      return `${l.routineName} on ${date} — ${Math.round(l.durationSeconds / 60)}min, ${l.caloriesBurned} kcal burned`;
-    });
-    return `Recent Workouts:\n${lines.join("\n")}`;
+    const startMs = startOfCurrentWeek().getTime();
+    const [logs, muscleActivity] = await Promise.all([
+      WorkoutLog.logsInRange(database, userId, startMs, Date.now()),
+      computeWeeklyMuscleActivity(database, userId),
+    ]);
+    if (logs.length === 0) return "WORKOUTS THIS WEEK\nNo workouts logged.";
+
+    const routineNames = [...new Set(logs.map((log) => log.routineName).filter(Boolean))];
+    const muscles = MUSCLE_KEYS
+      .filter((muscle) => muscleActivity.counts[muscle] > 0)
+      .map((muscle) => MUSCLE_LABELS[muscle]);
+
+    return [
+      "WORKOUTS THIS WEEK",
+      `Routines: ${routineNames.join(", ")}`,
+      `Muscles trained: ${muscles.length > 0 ? muscles.join(", ") : "Not available"}`,
+    ].join("\n");
   } catch { return ""; }
 }
 
@@ -133,28 +134,40 @@ export async function buildNutritionContext(): Promise<string> {
   try {
     const userId = await getUserIdFromToken();
     if (!userId) return "";
-    const lines: string[] = [];
-    for (let i = 0; i < 3; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const label = i === 0 ? "Today" : i === 1 ? "Yesterday" : "2 days ago";
-      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const endMs   = startMs + 24 * 60 * 60 * 1000;
-      const meals   = await database
-        .get<Meal>("meals")
-        .query(Q.and(Q.where("user_id", userId), Q.where("created_at", Q.between(startMs, endMs))))
-        .fetch();
-      if (meals.length > 0) {
-        const cal  = Math.round(meals.reduce((s, m) => s + m.calories, 0));
-        const prot = Math.round(meals.reduce((s, m) => s + m.protein, 0));
-        const carb = Math.round(meals.reduce((s, m) => s + m.carbohydrates, 0));
-        const fat  = Math.round(meals.reduce((s, m) => s + m.fats, 0));
-        lines.push(`${label}: ${cal} kcal — P:${prot}g C:${carb}g F:${fat}g (${meals.length} meal${meals.length > 1 ? "s" : ""})`);
-      } else {
-        lines.push(`${label}: no meals logged`);
-      }
+    const user = await GetUserDetails();
+    const weekStart = startOfCurrentWeek();
+    const meals = await database
+      .get<Meal>("meals")
+      .query(Q.and(
+        Q.where("user_id", userId),
+        Q.where("created_at", Q.between(weekStart.getTime(), Date.now())),
+      ))
+      .fetch();
+
+    const uniqueMealNames = [...new Set(
+      meals.map((meal) => meal.mealName.trim()).filter(Boolean),
+    )];
+    const caloriesByDay = new Map<string, number>();
+    for (const meal of meals) {
+      const key = localDateKey(new Date(meal.createdAt));
+      caloriesByDay.set(key, (caloriesByDay.get(key) || 0) + meal.calories);
     }
-    return `Nutrition (last 3 days):\n${lines.join("\n")}`;
+
+    const dailyCalories: string[] = [];
+    const day = new Date(weekStart);
+    const todayKey = localDateKey(new Date());
+    while (localDateKey(day) <= todayKey) {
+      const label = day.toLocaleDateString("en-US", { weekday: "short" });
+      dailyCalories.push(`${label} ${Math.round(caloriesByDay.get(localDateKey(day)) || 0)}`);
+      day.setDate(day.getDate() + 1);
+    }
+
+    return [
+      "NUTRITION THIS WEEK",
+      `Calorie plan: ${user?.goal || "Not set"}, ${Math.round(user?.caloricIntake || 0)} kcal/day`,
+      `Meals: ${uniqueMealNames.length > 0 ? uniqueMealNames.join(", ") : "None logged"}`,
+      `Daily calories (kcal): ${dailyCalories.join(", ")}`,
+    ].join("\n");
   } catch { return ""; }
 }
 
@@ -271,7 +284,7 @@ export async function sendChatMessage(
       // Auto-detect mode (ChatIsland quick-ask) — detect category and fetch data.
       const cat = detectCategory(text);
       const ctx = await getContextualData(cat);
-      question  = ctx ? `${text}\n\nUser Context:\n${JSON.stringify(ctx, null, 2)}` : text;
+      question  = ctx ? `${text}\n\nContext:\n${ctx}` : text;
     }
 
     const aiId = (Date.now() + 1).toString();

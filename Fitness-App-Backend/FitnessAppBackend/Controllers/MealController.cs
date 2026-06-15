@@ -35,7 +35,10 @@ namespace FitnessAppBackend.Controllers
                     Carbohydrates = request.Carbohydrates,
                     Fats = request.Fats,
                     HealthScoreOutOf10 = request.HealthScoreOutOf10,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    OneEmoji = request.Emojis.Count > 0
+                        ? MealEmojiFormatter.Combine(request.Emojis)
+                        : MealEmojiFormatter.Combine([request.OneEmoji ?? MealEmojiFormatter.FallbackEmoji])
                 };
                 await _mealService.AddAsync(meal);
                 return Ok("Meal added successfully.");

@@ -75,9 +75,16 @@ namespace FitnessAppBackend.Controllers
                         type = "string",
                         @enum = new[] { "Macro Rich", "Balanced Meal", "High Fat", "Consider Lighter Option", "Dairy Rich" }
                     },
-                    OneEmoji = new { type = "string" }
+                    Emojis = new
+                    {
+                        type = "array",
+                        description = "One to four relevant food emojis representing the visible meal components. Return each emoji as a separate array item.",
+                        minItems = 1,
+                        maxItems = 4,
+                        items = new { type = "string" }
+                    }
                 },
-                required = new[] { "isMeal", "ShortMealName", "CaloriesAmount", "Protein", "Carbs", "Fat", "MealQuality", "HealthScoreOutOf10", "OneEmoji" },
+                required = new[] { "isMeal", "ShortMealName", "CaloriesAmount", "Protein", "Carbs", "Fat", "MealQuality", "HealthScoreOutOf10", "Emojis" },
                 additionalProperties = false
             };
 
@@ -93,7 +100,11 @@ namespace FitnessAppBackend.Controllers
                         role = "user",
                         content = new object[]
                         {
-                            new { type = "input_text", text = "Estimate Meal Details and return JSON" },
+                            new
+                            {
+                                type = "input_text",
+                                text = "Estimate the meal details and return JSON. Include between one and four relevant food emojis, using separate emojis for the main visible meal components."
+                            },
                             new { type = "input_image", image_url = $"data:image/jpeg;base64,{imageBase64}" }
                         }
                     }
@@ -170,7 +181,10 @@ namespace FitnessAppBackend.Controllers
                     _logger.LogError("Deserialized mealResponse is null");
                     return StatusCode(500, "Failed to deserialize meal response");
                 }
-                
+
+                mealResponse.Emojis = MealEmojiFormatter.Normalize(mealResponse.Emojis);
+                var combinedEmojis = MealEmojiFormatter.Combine(mealResponse.Emojis);
+
                 var meal = new ConsumedMeal
                 {
                     UserId = Guid.Parse(UserId),
@@ -182,7 +196,7 @@ namespace FitnessAppBackend.Controllers
                     MealQuality = mealResponse.MealQuality,
                     HealthScoreOutOf10 = mealResponse.HealthScoreOutOf10,
                     CreatedAt = DateTime.UtcNow,
-                    OneEmoji = mealResponse.OneEmoji
+                    OneEmoji = combinedEmojis
                 };
 
                 await _mealService.AddAsync(meal);
@@ -195,13 +209,19 @@ namespace FitnessAppBackend.Controllers
                 return StatusCode(500, "Failed to save meal data");
             }
 
-            // Return the raw JSON response from AI to display on frontend
+            // Return validated and normalized JSON to the frontend.
             try
             {
-                //return the validated JSON
-                _logger.LogInformation("Returning raw JSON: {Json}", textContent);
-                var jsonDocument = JsonDocument.Parse(textContent);
-                return Content(textContent, "application/json");
+                var mealResponse = JsonSerializer.Deserialize<MealResponse>(textContent);
+                if (mealResponse == null)
+                {
+                    return StatusCode(500, "Failed to deserialize meal response");
+                }
+
+                mealResponse.Emojis = MealEmojiFormatter.Normalize(mealResponse.Emojis);
+                var normalizedJson = JsonSerializer.Serialize(mealResponse);
+                _logger.LogInformation("Returning normalized meal JSON: {Json}", normalizedJson);
+                return Content(normalizedJson, "application/json");
             }
             catch (Exception ex)
             {
@@ -209,7 +229,6 @@ namespace FitnessAppBackend.Controllers
                 return StatusCode(500, "Invalid JSON from AI");
             }
         }
-
 
         [Authorize]
         [HttpPost("AskChat")]

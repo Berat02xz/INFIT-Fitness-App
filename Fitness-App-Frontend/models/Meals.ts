@@ -5,6 +5,7 @@ import UserData from "./DTO/UserDTO";
 import UserDTO from "./DTO/UserDTO";
 import { User } from "./User";
 import { persistActivitySnapshotNow } from "@/database/expoGoActivityPersistence";
+import { normalizeMealEmojis } from "@/utils/mealEmojis";
 
 export class Meal extends Model {
   static table = "meals";
@@ -33,7 +34,7 @@ static async createMeal(database: Database, mealData: { userId: string; mealName
       meal.label = mealData.label;
       meal.createdAt = mealData.createdAt;
       meal.healthScore = mealData.healthScore;
-      meal.oneEmoji = mealData.oneEmoji;
+      meal.oneEmoji = normalizeMealEmojis(mealData.oneEmoji);
     });
   });
   await persistActivitySnapshotNow(database, mealData.userId);
