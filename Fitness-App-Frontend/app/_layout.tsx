@@ -1,13 +1,12 @@
 import { routeForSession } from "@/api/AuthSession";
 import RevenueCatService from "@/api/RevenueCatService";
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { Stack, ThemeProvider, DarkTheme } from "expo-router";
 import { useEffect, useState } from "react";
 import Toast, { BaseToast, ErrorToast, type BaseToastProps } from "react-native-toast-message";
 import { ActivityIndicator, View, StatusBar, Platform } from "react-native";
 import { theme } from "@/constants/theme";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ThemeProvider, DarkTheme } from "@react-navigation/native";
 import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context";
 import * as SystemUI from 'expo-system-ui';
 import { Ionicons } from "@expo/vector-icons";

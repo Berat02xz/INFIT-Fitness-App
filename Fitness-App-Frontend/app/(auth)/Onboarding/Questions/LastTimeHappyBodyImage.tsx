@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   background: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: -1,
   },
   innerContainer: {

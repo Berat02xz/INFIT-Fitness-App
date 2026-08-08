@@ -130,7 +130,7 @@ function ConstellationBackground() {
 
 const styles = StyleSheet.create({
   base: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: C.base,
   },
 });

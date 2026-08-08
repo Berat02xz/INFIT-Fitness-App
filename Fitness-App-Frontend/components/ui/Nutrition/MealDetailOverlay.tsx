@@ -105,11 +105,11 @@ export default function MealDetailOverlay({
 }
 
 const styles = StyleSheet.create({
-  root: { ...StyleSheet.absoluteFillObject, zIndex: 50 },
-  fill: StyleSheet.absoluteFillObject,
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.32)" },
+  root: { ...StyleSheet.absoluteFill, zIndex: 50 },
+  fill: StyleSheet.absoluteFill,
+  scrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.32)" },
   center: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,

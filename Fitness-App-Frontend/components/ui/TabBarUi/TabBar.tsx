@@ -3,7 +3,16 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from "react-native";
-import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import type { ComponentProps } from "react";
+import type { Tabs } from "expo-router";
+
+// expo-router builds its tab navigator from its own vendored copy of
+// react-navigation, so the props it hands to a custom `tabBar` render prop
+// are structurally, but not nominally, the same as @react-navigation/bottom-tabs'
+// BottomTabBarProps. Deriving the type from Tabs itself keeps this exact.
+type BottomTabBarProps = Parameters<
+  NonNullable<ComponentProps<typeof Tabs>["tabBar"]>
+>[0];
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { theme } from "@/constants/theme";
 import { useEffect } from "react";
@@ -195,7 +204,7 @@ export function TabBar({
                 style={styles.tabBtn}
                 activeOpacity={0.72}
               >
-                {icon[route.name as keyof typeof icon]?.({ focused: isFocused })}
+                {icon[route.name.replace(/\/index$/, "") as keyof typeof icon]?.({ focused: isFocused })}
               </TouchableOpacity>
             );
           })}
@@ -236,7 +245,7 @@ const styles = StyleSheet.create({
     zIndex: 4,
   },
   border: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 100,
     borderWidth: 1,
     borderTopColor: "rgba(255, 255, 255, 0.06)",

@@ -12,8 +12,7 @@ import PlatformBlur from "@/components/ui/PlatformBlur";
 import { theme } from "@/constants/theme";
 import { User } from "@/models/User";
 import database from "@/database/database";
-import { useFocusEffect } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "expo-router";
 import { Paywall } from "@/components/ui/RevenueCat/Paywall";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {

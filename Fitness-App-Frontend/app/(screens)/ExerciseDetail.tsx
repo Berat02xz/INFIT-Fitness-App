@@ -121,7 +121,7 @@ export default function ExerciseDetail() {
           {/* Fade overlay for header title readability (as the background is light gradient + image) */}
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.8)", "#000000"]}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             pointerEvents="none"
           />
 
@@ -239,7 +239,7 @@ const s = StyleSheet.create({
     position: "relative",
   },
   headerGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   heroImg: {
     width: "80%",

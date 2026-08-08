@@ -646,7 +646,7 @@ const st = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  chatOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 60, backgroundColor: C.bg },
+  chatOverlay: { ...StyleSheet.absoluteFill, zIndex: 60, backgroundColor: C.bg },
   scanPill: {
     position: "absolute",
     left: H_PAD,

@@ -1,30 +1,36 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { router, useFocusEffect } from "expo-router";
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   ScrollView,
-  Image,
   Dimensions,
   StatusBar,
   StyleSheet,
-  Animated,
-  Easing,
-  LayoutAnimation,
-  Platform,
-  UIManager,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import PlatformBlur from "@/components/ui/PlatformBlur";
+import { Image as ExpoImage } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GestureDetector } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  Extrapolation,
+  FadeInDown,
+  interpolate,
+  interpolateColor,
+  runOnJS,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+  withDelay,
+  withSequence,
+  withSpring,
+  withTiming,
+  type SharedValue,
+} from "react-native-reanimated";
 import { theme } from "@/constants/theme";
-import FadeTranslate from "@/components/ui/FadeTranslate";
-import { SquircleFrame } from "@/components/ui/Squircle";
 import { useAskBarScroll } from "@/components/ui/AskBar/AskBarContext";
 import { ROUTINES, type WorkoutRoutine } from "@/constants/workoutRoutines";
 import { User } from "@/models/User";
@@ -32,16 +38,11 @@ import { SavedRoutine } from "@/models/SavedRoutine";
 import { getUserIdFromToken } from "@/api/TokenDecoder";
 import database from "@/database/database";
 
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const H_PAD = 18;
+const H_PAD = 16;
 const CARD_W = SCREEN_W - H_PAD * 2;
-const CARD_H = CARD_W * 1.0;
-const CARD_RADIUS = 40;
-const ITEM_H = CARD_H + 16;
+const MEDIA_H = Math.round(CARD_W * 0.64);
+const TILE = 56;
 
 const AVATARS = [
   require("@/assets/avatars/avatar1.jpg"),
@@ -53,13 +54,46 @@ const AVATARS = [
   require("@/assets/avatars/avatar7.jpg"),
 ];
 
-const FILTER_PILLS = ["All", "Your Routines", "< 30 min", "Beginner", "Strength", "Cardio"];
+// orb-style palette: black canvas, white cards, peach-orange accents
+const C = {
+  bg: "#000000",
+  card: "#FFFFFF",
+  ink: "#111114",
+  sub: "#8A8A8E",
+  hairline: "rgba(17,17,20,0.08)",
+  orange: "#F0955C",
+  tile: "#17191B",
+  media: "#141416",
+};
+
+// Filter keys must stay in sync with matchesFilter below.
+const FILTERS = [
+  { key: "All", label: "All", icon: "flash" as const, tint: "#FFD60A" },
+  { key: "Your Routines", label: "Saved", icon: "bookmark" as const, tint: "#F0955C" },
+  { key: "< 30 min", label: "Quick", icon: "time" as const, tint: "#5AC8FA" },
+  { key: "Beginner", label: "Beginner", icon: "leaf" as const, tint: "#34C759" },
+  { key: "Strength", label: "Strength", icon: "barbell" as const, tint: "#FF6B6B" },
+  { key: "Cardio", label: "Cardio", icon: "pulse" as const, tint: "#FF375F" },
+];
+
+const POSTED_AGO = ["1h ago", "3h ago", "6h ago", "1d ago", "1d ago", "2d ago", "3d ago", "5d ago"];
+const COMMENTS = [
+  "Dope! LFG! 🔥",
+  "New PR thanks to this 💪",
+  "Day 12 and it actually works",
+  "Best routine on here 🙌",
+  "Sweating buckets rn 😅",
+  "Added to my week, insane pump",
+];
 
 const formatCount = (n: number) =>
   n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : `${n}`;
 
 const diffColor = (d: string) =>
   d === "Beginner" ? "#34C759" : d === "Intermediate" ? "#FF9500" : "#FF5C5C";
+
+const handleOf = (r: WorkoutRoutine) =>
+  "@" + (r.athlete?.name ?? "Invicta").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const matchesFilter = (r: WorkoutRoutine, pill: string, savedIds: Set<string>) => {
   const muscles = r.targetMuscles.map((m) => m.toLowerCase());
@@ -87,122 +121,263 @@ const HOME_GEAR = ["body weight", "gym mat", "no equipment"];
 const isGymRoutine = (r: WorkoutRoutine) =>
   r.equipment.some((e) => !HOME_GEAR.includes(e.toLowerCase()));
 
-const D = { bg: "#000", primary: "#AAFB05", text: "#fff", sub: "#8E8E93", pill: "#17191B" };
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// ── FilterPill ────────────────────────────────────────────────────────────────
-const FilterPill = React.memo(function FilterPill({
-  label, active, onPress,
+// ── FilterTile ────────────────────────────────────────────────────────────────
+// Rounded icon tile (like the app-icon row in orb). Tapping it springs the tile
+// open into a white pill revealing its label; tapping another closes it back.
+const FilterTile = React.memo(function FilterTile({
+  item, active, onPress,
 }: {
-  label: string;
+  item: (typeof FILTERS)[number];
   active: boolean;
   onPress: () => void;
 }) {
-  const anim = useRef(new Animated.Value(active ? 1 : 0)).current;
+  const prog = useSharedValue(active ? 1 : 0);
+  const press = useSharedValue(0);
+  const labelW = item.label.length * 8.4 + 16;
+
   useEffect(() => {
-    Animated.timing(anim, { toValue: active ? 1 : 0, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
-  }, [active, anim]);
-  const backgroundColor = anim.interpolate({ inputRange: [0, 1], outputRange: [D.pill, D.primary] });
-  const paddingHorizontal = anim.interpolate({ inputRange: [0, 1], outputRange: [20, 30] });
-  const color = anim.interpolate({ inputRange: [0, 1], outputRange: ["#C8C8C8", "#000000"] });
+    prog.value = withSpring(active ? 1 : 0, { damping: 17, stiffness: 190 });
+  }, [active, prog]);
+
+  const wrapStyle = useAnimatedStyle(() => ({
+    width: TILE + prog.value * labelW,
+    backgroundColor: interpolateColor(prog.value, [0, 1], [C.tile, "#FFFFFF"]),
+    transform: [{ scale: 1 - press.value * 0.08 + prog.value * 0.03 }],
+  }));
+  const idleIcon = useAnimatedStyle(() => ({ opacity: 1 - prog.value }));
+  const activeIcon = useAnimatedStyle(() => ({ opacity: prog.value }));
+  const labelStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(prog.value, [0.55, 1], [0, 1], Extrapolation.CLAMP),
+    transform: [{ translateX: (1 - prog.value) * -10 }],
+  }));
+
   return (
-    <TouchableOpacity activeOpacity={0.85} onPress={onPress}>
-      <Animated.View style={[s.pill, { backgroundColor, paddingHorizontal }]}>
-        <Animated.Text style={[s.pillText, { color, fontFamily: active ? theme.semibold : theme.medium }]}>{label}</Animated.Text>
-      </Animated.View>
-    </TouchableOpacity>
+    <AnimatedPressable
+      onPress={onPress}
+      onPressIn={() => { press.value = withTiming(1, { duration: 90 }); }}
+      onPressOut={() => { press.value = withSpring(0, { damping: 14 }); }}
+      style={[s.tile, wrapStyle]}
+      hitSlop={4}
+    >
+      <View style={s.tileIconBox}>
+        <Animated.View style={[StyleSheet.absoluteFill, s.center, idleIcon]}>
+          <Ionicons name={item.icon} size={22} color={item.tint} />
+        </Animated.View>
+        <Animated.View style={[StyleSheet.absoluteFill, s.center, activeIcon]}>
+          <Ionicons name={item.icon} size={22} color="#000" />
+        </Animated.View>
+      </View>
+      <Animated.Text style={[s.tileLabel, { width: labelW }, labelStyle]} numberOfLines={1}>
+        {item.label}
+      </Animated.Text>
+    </AnimatedPressable>
   );
 });
 
-// ── RoutineCard ───────────────────────────────────────────────────────────────
-const RoutineCard = React.memo(function RoutineCard({
-  routine, idx, isFocused, onPress,
+// ── pop-in helper: element scales in with overshoot as the card reveals ───────
+function usePop(pop: SharedValue<number>, start: number) {
+  return useAnimatedStyle(() => {
+    const t = interpolate(pop.value, [start, Math.min(start + 0.35, 1)], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity: t,
+      transform: [{ scale: interpolate(t, [0, 0.7, 1], [0.2, 1.14, 1]) }],
+    };
+  });
+}
+
+// ── SocialCard ────────────────────────────────────────────────────────────────
+const SocialCard = React.memo(function SocialCard({
+  routine, idx, saved, feedY, scrollY, onPress,
 }: {
   routine: WorkoutRoutine;
   idx: number;
-  isFocused: boolean;
+  saved: boolean;
+  feedY: SharedValue<number>;
+  scrollY: SharedValue<number>;
   onPress: (id: string) => void;
 }) {
-  const av0 = AVATARS[(idx * 3 + 0) % AVATARS.length];
-  const av1 = AVATARS[(idx * 3 + 1) % AVATARS.length];
-  const av2 = AVATARS[(idx * 3 + 2) % AVATARS.length];
+  const cardY = useSharedValue(0);
+  const press = useSharedValue(0);
+  const mount = useSharedValue(0);
+  const likePop = useSharedValue(1);
+  const [liked, setLiked] = useState(false);
 
-  const av2Anim = useRef(new Animated.Value(0)).current;
-  const av1Anim = useRef(new Animated.Value(0)).current;
-  const av0Anim = useRef(new Animated.Value(0)).current;
-  const countAnim = useRef(new Animated.Value(0)).current;
-  const mountedRef = useRef(false);
+  const completions = routine.completions ?? 0;
+  const likes = Math.round(completions * 0.042) + (liked ? 1 : 0);
+  const comments = Math.max(4, Math.round(completions * 0.0031));
+  const shares = Math.max(2, Math.round(completions * 0.0014));
+  const handle = handleOf(routine);
+  const tags = routine.targetMuscles
+    .map((m) => "#" + m.toLowerCase().replace(/\s+/g, ""))
+    .join(" ");
+  const withLikedRow = idx % 2 === 0;
 
   useEffect(() => {
-    const isMount = !mountedRef.current;
-    mountedRef.current = true;
-    let timer: ReturnType<typeof setTimeout>;
-    if (isFocused) {
-      timer = setTimeout(() => {
-        Animated.stagger(110, [
-          Animated.spring(av2Anim, { toValue: 1, friction: 9, tension: 70, useNativeDriver: true }),
-          Animated.spring(av1Anim, { toValue: 1, friction: 9, tension: 70, useNativeDriver: true }),
-          Animated.spring(av0Anim, { toValue: 1, friction: 9, tension: 70, useNativeDriver: true }),
-          Animated.spring(countAnim, { toValue: 1, friction: 9, tension: 70, useNativeDriver: true }),
-        ]).start();
-      }, isMount ? 480 : 0);
-    } else {
-      Animated.parallel([
-        Animated.timing(av0Anim, { toValue: 0, duration: 150, useNativeDriver: true }),
-        Animated.timing(av1Anim, { toValue: 0, duration: 150, useNativeDriver: true }),
-        Animated.timing(av2Anim, { toValue: 0, duration: 150, useNativeDriver: true }),
-        Animated.timing(countAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
-      ]).start();
-    }
-    return () => clearTimeout(timer);
-  }, [isFocused]);
+    mount.value = withDelay(380 + Math.min(idx, 5) * 110, withSpring(1, { damping: 13 }));
+  }, [idx, mount]);
 
-  const av2Scale = av2Anim.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
-  const av1Scale = av1Anim.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
-  const av0Scale = av0Anim.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
-  const countScale = countAnim.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
+  // Reveal progress: 0 while the card is below the viewport, 1 once its top has
+  // risen ~1/3 into view. Scroll-driven, so it plays in reverse on the way up.
+  const p = useDerivedValue(() => {
+    const top = feedY.value + cardY.value;
+    return interpolate(
+      scrollY.value + SCREEN_H,
+      [top + 90, top + 340],
+      [0, 1],
+      Extrapolation.CLAMP
+    );
+  });
+  const pop = useDerivedValue(() => Math.min(p.value, mount.value));
+
+  const revealStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(p.value, [0, 0.6], [0, 1], Extrapolation.CLAMP),
+    transform: [
+      { translateY: interpolate(p.value, [0, 1], [44, 0], Extrapolation.CLAMP) },
+      { scale: interpolate(p.value, [0, 1], [0.95, 1], Extrapolation.CLAMP) * (1 - press.value * 0.02) },
+    ],
+  }));
+
+  // Subtle parallax on the media image as the card travels through the screen.
+  const parallaxStyle = useAnimatedStyle(() => {
+    const top = feedY.value + cardY.value;
+    return {
+      transform: [{
+        translateY: interpolate(
+          scrollY.value,
+          [top - SCREEN_H, top + MEDIA_H + 200],
+          [-16, 16],
+          Extrapolation.CLAMP
+        ),
+      }],
+    };
+  });
+
+  const headerAvStyle = usePop(pop, 0.15);
+  const av0Style = usePop(pop, 0.3);
+  const av1Style = usePop(pop, 0.42);
+  const av2Style = usePop(pop, 0.54);
+  const likeHeartStyle = useAnimatedStyle(() => ({ transform: [{ scale: likePop.value }] }));
+
+  const onLike = useCallback(() => {
+    likePop.value = withSequence(
+      withSpring(1.35, { damping: 9, stiffness: 320 }),
+      withSpring(1, { damping: 13 })
+    );
+    setLiked((v) => !v);
+  }, [likePop]);
 
   return (
-    <FadeTranslate direction="y" translateYFrom={36} delay={300} order={Math.min(idx, 4) * 0.1}>
-      <TouchableOpacity activeOpacity={0.96} onPress={() => onPress(routine.id)}>
-        <View style={s.card}>
-          <LinearGradient colors={routine.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-          {routine.image ? <Image source={{ uri: routine.image }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
-          <LinearGradient colors={["rgba(0,0,0,0.62)", "rgba(0,0,0,0.18)", "rgba(0,0,0,0.02)"]} locations={[0, 0.36, 0.62]} style={StyleSheet.absoluteFill} />
-
-          <View style={s.cardTopRow}>
-            <View>
-              <View style={s.cardTimeRow}>
-                <Text style={s.cardTime}>{routine.duration}</Text>
-                <Text style={[s.cardDiff, { color: diffColor(routine.difficulty) }]}>{routine.difficulty}</Text>
-              </View>
-              <View style={s.avatarRow}>
-                <Animated.View style={{ opacity: av2Anim, transform: [{ scale: av2Scale }] }}><Image source={av2} style={s.stackAv} /></Animated.View>
-                <Animated.View style={{ opacity: av1Anim, transform: [{ scale: av1Scale }], marginLeft: -9 }}><Image source={av1} style={s.stackAv} /></Animated.View>
-                <Animated.View style={{ opacity: av0Anim, transform: [{ scale: av0Scale }], marginLeft: -9 }}><Image source={av0} style={s.stackAv} /></Animated.View>
-                <Animated.View style={[s.countPill, { opacity: countAnim, transform: [{ scale: countScale }] }]}>
-                  <Text style={s.countPillText}>+{formatCount(routine.completions ?? 0)}</Text>
-                </Animated.View>
-              </View>
+    <Animated.View
+      entering={FadeInDown.duration(480).delay(140 + Math.min(idx, 6) * 90)}
+      onLayout={(e) => { cardY.value = e.nativeEvent.layout.y; }}
+    >
+      <AnimatedPressable
+        style={[s.card, revealStyle]}
+        onPress={() => onPress(routine.id)}
+        onPressIn={() => { press.value = withTiming(1, { duration: 110 }); }}
+        onPressOut={() => { press.value = withSpring(0, { damping: 14 }); }}
+      >
+        {/* social strip: friends-liked stack or a top comment */}
+        {withLikedRow ? (
+          <View style={s.socialStrip}>
+            <View style={s.stripStack}>
+              <Animated.View style={av0Style}><ExpoImage source={AVATARS[(idx * 3) % 7]} style={s.stripAv} /></Animated.View>
+              <Animated.View style={[av1Style, s.overlap]}><ExpoImage source={AVATARS[(idx * 3 + 1) % 7]} style={s.stripAv} /></Animated.View>
+              <Animated.View style={[av2Style, s.overlap]}><ExpoImage source={AVATARS[(idx * 3 + 2) % 7]} style={s.stripAv} /></Animated.View>
             </View>
-            <View style={s.starCircle}><Ionicons name="star" size={16} color="#fff" /></View>
+            <Text style={s.stripText} numberOfLines={1}>
+              <Text style={s.stripStrong}>{formatCount(likes)}</Text> athletes liked this routine
+            </Text>
           </View>
-
-          <View style={s.glassBarWrap}>
-            <PlatformBlur intensity={55} tint="light" androidColor="rgba(40,40,42,0.82)" style={s.glassBar}>
-              <View style={s.glassTextCol}>
-                <Text style={s.glassTitle} numberOfLines={1}>{routine.name}</Text>
-                <Text style={s.glassSub} numberOfLines={1}>Routine by {routine.athlete?.name ?? "Invicta"} • {routine.exercises.length} exercises</Text>
-              </View>
-              <View style={s.arrowCircle}>
-                <Ionicons name="arrow-forward" size={19} color="#000" style={{ transform: [{ rotate: "-45deg" }] }} />
-              </View>
-            </PlatformBlur>
+        ) : (
+          <View style={s.socialStrip}>
+            <Animated.View style={av0Style}>
+              <ExpoImage source={AVATARS[(idx * 5 + 2) % 7]} style={s.commentAv} />
+            </Animated.View>
+            <Text style={s.stripText} numberOfLines={1}>{COMMENTS[idx % COMMENTS.length]}</Text>
           </View>
+        )}
+        <View style={s.hairline} />
 
-          <SquircleFrame width={CARD_W} height={CARD_H} cornerRadius={CARD_RADIUS} color={D.bg} strokeColor="rgba(255,255,255,0.07)" />
+        {/* author row */}
+        <View style={s.authorRow}>
+          <Animated.View style={headerAvStyle}>
+            <ExpoImage source={AVATARS[idx % 7]} style={s.authorAv} transition={200} />
+          </Animated.View>
+          <View style={s.authorCol}>
+            <Text style={s.authorName} numberOfLines={1}>{routine.athlete?.name ?? "Invicta"}</Text>
+            <Text style={s.authorSub} numberOfLines={1}>
+              Posted in {routine.targetMuscles[0]?.toLowerCase() ?? "fitness"} ~{POSTED_AGO[idx % POSTED_AGO.length]}
+            </Text>
+          </View>
+          {saved && <Ionicons name="bookmark" size={18} color={C.orange} />}
         </View>
-      </TouchableOpacity>
-    </FadeTranslate>
+
+        {/* post body */}
+        <Text style={s.postBody}>
+          {routine.description} <Text style={s.mention}>{handle}</Text> <Text style={s.mention}>{tags}</Text>
+        </Text>
+
+        {/* media card */}
+        <View style={s.media}>
+          {routine.image ? (
+            <Animated.View style={[s.mediaImgWrap, parallaxStyle]}>
+              <ExpoImage source={{ uri: routine.image }} style={s.mediaImg} contentFit="cover" transition={300} recyclingKey={routine.id} />
+            </Animated.View>
+          ) : (
+            <LinearGradient colors={routine.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+          )}
+          <LinearGradient
+            colors={["rgba(0,0,0,0.6)", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.55)"]}
+            locations={[0, 0.45, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={s.mediaTopRow}>
+            <View style={s.mediaTitleCol}>
+              <Text style={s.mediaTitle} numberOfLines={2}>{routine.name}</Text>
+              <Text style={s.mediaSub} numberOfLines={1}>{routine.athlete?.name ?? "Invicta"} × Invicta</Text>
+            </View>
+            <View style={s.diffPill}>
+              <View style={[s.diffDot, { backgroundColor: diffColor(routine.difficulty) }]} />
+              <Text style={s.diffText}>{routine.difficulty}</Text>
+            </View>
+          </View>
+          <View style={s.mediaBottomRow}>
+            <View style={s.durationPill}>
+              <Ionicons name="time-outline" size={13} color="#fff" />
+              <Text style={s.durationText}>{routine.duration}</Text>
+            </View>
+            <View style={s.playCircle}>
+              <Ionicons name="play" size={22} color="#000" style={{ marginLeft: 2 }} />
+            </View>
+          </View>
+        </View>
+
+        {/* footer: likes / comments / shares / more */}
+        <View style={s.footerRow}>
+          <Pressable style={s.footerBtn} onPress={onLike} hitSlop={8}>
+            <Animated.View style={likeHeartStyle}>
+              <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color={liked ? C.orange : C.ink} />
+            </Animated.View>
+            <Text style={s.footerCount}>{formatCount(likes)}</Text>
+          </Pressable>
+          <Pressable style={s.footerBtn} onPress={() => onPress(routine.id)} hitSlop={8}>
+            <Ionicons name="chatbubble-outline" size={20} color={C.ink} />
+            <Text style={s.footerCount}>{formatCount(comments)}</Text>
+          </Pressable>
+          <Pressable style={s.footerBtn} onPress={() => onPress(routine.id)} hitSlop={8}>
+            <Ionicons name="arrow-redo-outline" size={21} color={C.ink} />
+            <Text style={s.footerCount}>{formatCount(shares)}</Text>
+          </Pressable>
+          <View style={{ flex: 1 }} />
+          <Pressable onPress={() => onPress(routine.id)} hitSlop={8}>
+            <Ionicons name="ellipsis-horizontal" size={20} color={C.sub} />
+          </Pressable>
+        </View>
+      </AnimatedPressable>
+    </Animated.View>
   );
 });
 
@@ -214,11 +389,11 @@ export default function Workout() {
 
   const [userName, setUserName] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
-  const [focusedCard, setFocusedCard] = useState(0);
   const [workoutMode, setWorkoutMode] = useState<"home" | "gym">("home");
   const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set());
 
-  const feedListYRef = useRef(0);
+  const scrollY = useSharedValue(0);
+  const feedY = useSharedValue(0);
   const HEADER_H = insets.top + 70;
 
   useEffect(() => {
@@ -259,9 +434,9 @@ export default function Workout() {
     return [...list].sort((a, b) => (b.completions ?? 0) - (a.completions ?? 0));
   }, [workoutMode, activeFilter, savedIds]);
 
-  // Hide the "Your Routines" pill entirely until the user has saved a routine.
-  const visiblePills = useMemo(
-    () => (savedIds.size > 0 ? FILTER_PILLS : FILTER_PILLS.filter((p) => p !== "Your Routines")),
+  // Hide the "Saved" tile entirely until the user has saved a routine.
+  const visibleFilters = useMemo(
+    () => (savedIds.size > 0 ? FILTERS : FILTERS.filter((f) => f.key !== "Your Routines")),
     [savedIds]
   );
 
@@ -270,32 +445,21 @@ export default function Workout() {
     if (activeFilter === "Your Routines" && savedIds.size === 0) setActiveFilter("All");
   }, [activeFilter, savedIds]);
 
-  const switchFilter = useCallback((pill: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
-    setActiveFilter(pill);
-    setFocusedCard(0);
-  }, []);
-
   const openRoutine = useCallback((routineId: string) => {
     router.push({ pathname: "/RoutineDetail", params: { routineId } });
   }, []);
 
-  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const sy = e.nativeEvent.contentOffset.y;
-    askScroll.onScroll(sy);
-    const screenCenter = sy + SCREEN_H * 0.48;
-    const relative = screenCenter - feedListYRef.current;
-    const newIdx = Math.max(0, Math.min(routines.length - 1, Math.round(relative / ITEM_H - 0.3)));
-    setFocusedCard((prev) => (prev !== newIdx ? newIdx : prev));
-  }, [routines.length, askScroll]);
-
-  const onScrollEndDrag = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    askScroll.onScrollEndDrag(e.nativeEvent.contentOffset.y);
-  }, [askScroll]);
-
-  const onFeedListLayout = useCallback((e: any) => {
-    feedListYRef.current = e.nativeEvent.layout.y;
-  }, []);
+  const reportScroll = askScroll.onScroll;
+  const reportEndDrag = askScroll.onScrollEndDrag;
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+      runOnJS(reportScroll)(e.contentOffset.y);
+    },
+    onEndDrag: (e) => {
+      runOnJS(reportEndDrag)(e.contentOffset.y);
+    },
+  });
 
   return (
     <View style={s.container}>
@@ -304,90 +468,136 @@ export default function Workout() {
       <LinearGradient colors={["transparent", "rgba(0,0,0,0.38)", "rgba(0,0,0,0.82)"]} locations={[0, 0.55, 1]} style={s.bottomScreenFade} pointerEvents="none" />
 
       <GestureDetector gesture={askScroll.pullGesture}>
-      <ScrollView
+      <Animated.ScrollView
         style={s.scroll}
         contentContainerStyle={{ paddingTop: HEADER_H + 8, paddingBottom: insets.bottom + 110 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        onScroll={onScroll}
-        onScrollEndDrag={onScrollEndDrag}
+        onScroll={scrollHandler}
         scrollEventThrottle={16}
       >
-        <FadeTranslate order={0} delay={60} direction="y" translateYFrom={-10}>
-          <View style={s.helloWrap}>
-            <Text style={s.hello}>Hello, {userName || "Athlete"}</Text>
-            <Text style={s.helloSub}>Let&apos;s explore your workout world!</Text>
-          </View>
-        </FadeTranslate>
+        <Animated.View entering={FadeInDown.duration(420).delay(60)} style={s.helloWrap}>
+          <Text style={s.hello}>Hello, {userName || "Athlete"}</Text>
+          <Text style={s.helloSub}>Let&apos;s explore your workout world!</Text>
+        </Animated.View>
 
-        <FadeTranslate order={0} delay={140} direction="y" translateYFrom={12}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pillScroll}>
-            {visiblePills.map((pill) => (
-              <FilterPill key={pill} label={pill} active={activeFilter === pill} onPress={() => switchFilter(pill)} />
+        <Animated.View entering={FadeInDown.duration(420).delay(140)}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tileScroll}>
+            {visibleFilters.map((f) => (
+              <FilterTile
+                key={f.key}
+                item={f}
+                active={activeFilter === f.key}
+                onPress={() => setActiveFilter(activeFilter === f.key ? "All" : f.key)}
+              />
             ))}
           </ScrollView>
-        </FadeTranslate>
+        </Animated.View>
 
-        <FadeTranslate order={0} delay={200} direction="y" translateYFrom={14}>
-          <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Workout Routines</Text>
-            <Text style={s.createText}>Create</Text>
-          </View>
-        </FadeTranslate>
+        <Animated.View entering={FadeInDown.duration(420).delay(200)} style={s.sectionRow}>
+          <Text style={s.sectionTitle}>For You</Text>
+          <Text style={s.sectionCount}>{routines.length} routines</Text>
+        </Animated.View>
 
-        <View style={s.feedList} onLayout={onFeedListLayout}>
+        <View
+          key={activeFilter}
+          style={s.feedList}
+          onLayout={(e) => { feedY.value = e.nativeEvent.layout.y; }}
+        >
           {routines.map((routine, idx) => (
-            <RoutineCard key={routine.id} routine={routine} idx={idx} isFocused={focusedCard === idx} onPress={openRoutine} />
+            <SocialCard
+              key={routine.id}
+              routine={routine}
+              idx={idx}
+              saved={savedIds.has(routine.id)}
+              feedY={feedY}
+              scrollY={scrollY}
+              onPress={openRoutine}
+            />
           ))}
           {routines.length === 0 && (
-            <Text style={s.emptyText}>
-              {activeFilter === "Your Routines"
-                ? "You haven't saved any routines yet."
-                : `No ${workoutMode === "gym" ? "gym" : "home"} workouts in this category yet.`}
-            </Text>
+            <Animated.View entering={FadeInDown.duration(420)} style={s.emptyWrap}>
+              <Ionicons name="barbell-outline" size={28} color={C.sub} />
+              <Text style={s.emptyText}>
+                {activeFilter === "Your Routines"
+                  ? "You haven't saved any routines yet."
+                  : `No ${workoutMode === "gym" ? "gym" : "home"} workouts in this category yet.`}
+              </Text>
+            </Animated.View>
           )}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
       </GestureDetector>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: D.bg },
+  container: { flex: 1, backgroundColor: C.bg },
   scroll: { flex: 1 },
+  center: { alignItems: "center", justifyContent: "center" },
 
-  helloWrap: { paddingHorizontal: H_PAD, marginBottom: 18, marginTop: 2 },
-  hello: { color: D.text, fontFamily: theme.semibold, fontSize: 30, lineHeight: 35, letterSpacing: -0.6 },
-  helloSub: { color: "#8E8E93", fontFamily: theme.regular, fontSize: 13, lineHeight: 17, marginTop: 2 },
+  helloWrap: { paddingHorizontal: H_PAD + 2, marginBottom: 18, marginTop: 2 },
+  hello: { color: "#fff", fontFamily: theme.semibold, fontSize: 30, lineHeight: 35, letterSpacing: -0.6 },
+  helloSub: { color: C.sub, fontFamily: theme.regular, fontSize: 13, lineHeight: 17, marginTop: 2 },
 
-  pillScroll: { paddingHorizontal: H_PAD, paddingBottom: 20, gap: 10 },
-  pill: { height: 46, justifyContent: "center", alignItems: "center", borderRadius: 23 },
-  pillText: { fontFamily: theme.medium, fontSize: 14 },
+  tileScroll: { paddingHorizontal: H_PAD, paddingBottom: 20, gap: 10, alignItems: "center" },
+  tile: {
+    height: TILE, borderRadius: 19, borderCurve: "continuous",
+    flexDirection: "row", alignItems: "center", overflow: "hidden",
+  },
+  tileIconBox: { width: TILE, height: TILE },
+  tileLabel: { color: "#000", fontFamily: theme.semibold, fontSize: 13.5, marginLeft: -8 },
 
-  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: H_PAD, marginBottom: 14 },
-  sectionTitle: { color: D.text, fontFamily: theme.semibold, fontSize: 22, letterSpacing: -0.4 },
-  createText: { color: D.primary, fontFamily: theme.semibold, fontSize: 14 },
+  sectionRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", paddingHorizontal: H_PAD + 2, marginBottom: 14 },
+  sectionTitle: { color: "#fff", fontFamily: theme.semibold, fontSize: 22, letterSpacing: -0.4 },
+  sectionCount: { color: C.sub, fontFamily: theme.medium, fontSize: 12.5 },
 
-  feedList: { paddingHorizontal: H_PAD, gap: 16 },
-  card: { width: CARD_W, height: CARD_H, backgroundColor: "#0D0D0D" },
-  cardTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", padding: 20 },
-  cardTimeRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
-  cardTime: { color: "#fff", fontFamily: theme.semibold, fontSize: 24, letterSpacing: -0.4 },
-  cardDiff: { fontFamily: theme.semibold, fontSize: 12 },
-  avatarRow: { flexDirection: "row", alignItems: "center", marginTop: 7 },
-  stackAv: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: "rgba(0,0,0,0.85)" },
-  countPill: { backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 999, paddingHorizontal: 8, height: 24, alignItems: "center", justifyContent: "center", marginLeft: -6, borderWidth: 1.5, borderColor: "rgba(0,0,0,0.85)" },
-  countPillText: { color: "#fff", fontFamily: theme.semibold, fontSize: 10 },
-  starCircle: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center" },
+  feedList: { paddingHorizontal: H_PAD, gap: 14 },
 
-  glassBarWrap: { position: "absolute", bottom: 12, left: 12, right: 12, borderRadius: 30, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.28)" },
-  glassBar: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(255,255,255,0.14)", paddingVertical: 11, paddingLeft: 18, paddingRight: 10 },
-  glassTextCol: { flex: 1, gap: 2 },
-  glassTitle: { color: "#fff", fontFamily: theme.semibold, fontSize: 17.5, letterSpacing: -0.2, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
-  glassSub: { color: "rgba(255,255,255,0.85)", fontFamily: theme.medium, fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5 },
-  arrowCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
+  card: {
+    backgroundColor: C.card, borderRadius: 30, borderCurve: "continuous",
+    paddingHorizontal: 16, paddingTop: 13, paddingBottom: 12, overflow: "hidden",
+  },
 
-  emptyText: { color: D.sub, fontFamily: theme.medium, fontSize: 14, textAlign: "center" },
+  socialStrip: { flexDirection: "row", alignItems: "center", gap: 9, paddingBottom: 11, paddingHorizontal: 2 },
+  stripStack: { flexDirection: "row", alignItems: "center" },
+  stripAv: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: "#fff" },
+  overlap: { marginLeft: -8 },
+  commentAv: { width: 20, height: 20, borderRadius: 10 },
+  stripText: { flex: 1, color: C.sub, fontFamily: theme.medium, fontSize: 12.5 },
+  stripStrong: { color: C.ink, fontFamily: theme.semibold },
+  hairline: { height: StyleSheet.hairlineWidth, backgroundColor: C.hairline, marginHorizontal: -16 },
+
+  authorRow: { flexDirection: "row", alignItems: "center", gap: 11, paddingTop: 12, paddingHorizontal: 2 },
+  authorAv: { width: 40, height: 40, borderRadius: 20 },
+  authorCol: { flex: 1, gap: 1 },
+  authorName: { color: C.ink, fontFamily: theme.semibold, fontSize: 16, letterSpacing: -0.2 },
+  authorSub: { color: C.sub, fontFamily: theme.medium, fontSize: 12 },
+
+  postBody: { color: C.ink, fontFamily: theme.medium, fontSize: 15, lineHeight: 21, paddingTop: 10, paddingBottom: 12, paddingHorizontal: 2, letterSpacing: -0.1 },
+  mention: { color: C.orange, fontFamily: theme.semibold },
+
+  media: { height: MEDIA_H, borderRadius: 22, borderCurve: "continuous", overflow: "hidden", backgroundColor: C.media },
+  mediaImgWrap: { position: "absolute", top: -18, left: 0, right: 0, height: MEDIA_H + 36 },
+  mediaImg: { width: "100%", height: "100%" },
+  mediaTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", padding: 16, gap: 10 },
+  mediaTitleCol: { flex: 1, gap: 3 },
+  mediaTitle: { color: "#fff", fontFamily: theme.semibold, fontSize: 21, lineHeight: 25, letterSpacing: -0.4 },
+  mediaSub: { color: "rgba(255,255,255,0.82)", fontFamily: theme.medium, fontSize: 12 },
+  diffPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(20,20,22,0.6)", borderRadius: 999, paddingHorizontal: 10, height: 26 },
+  diffDot: { width: 6, height: 6, borderRadius: 3 },
+  diffText: { color: "#fff", fontFamily: theme.semibold, fontSize: 11 },
+  mediaBottomRow: { position: "absolute", bottom: 14, left: 16, right: 14, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
+  durationPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(20,20,22,0.72)", borderRadius: 999, paddingHorizontal: 11, height: 30 },
+  durationText: { color: "#fff", fontFamily: theme.semibold, fontSize: 13 },
+  playCircle: { width: 52, height: 52, borderRadius: 26, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
+
+  footerRow: { flexDirection: "row", alignItems: "center", gap: 20, paddingTop: 12, paddingHorizontal: 4 },
+  footerBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
+  footerCount: { color: C.ink, fontFamily: theme.semibold, fontSize: 13.5 },
+
+  emptyWrap: { alignItems: "center", gap: 10, paddingVertical: 40 },
+  emptyText: { color: C.sub, fontFamily: theme.medium, fontSize: 14, textAlign: "center" },
   bottomScreenFade: { position: "absolute", bottom: 0, left: 0, right: 0, height: 130, zIndex: 10 },
 });

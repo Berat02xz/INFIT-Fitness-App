@@ -241,24 +241,24 @@ export default function RoutineDetail() {
       >
         {/* ── Hero ── */}
         <View style={[s.hero, { height: heroHeight }]}>
-          <BlurTargetView ref={heroBlurTarget} style={StyleSheet.absoluteFillObject}>
+          <BlurTargetView ref={heroBlurTarget} style={StyleSheet.absoluteFill}>
             <Animated.View
               style={[
-                StyleSheet.absoluteFillObject,
+                StyleSheet.absoluteFill,
                 { transform: [{ translateY: heroTranslate }, { scale: heroScale }] },
               ]}
             >
               {routine.image ? (
                 <Image source={{ uri: routine.image }} style={s.fill} resizeMode="cover" />
               ) : (
-                <LinearGradient colors={routine.gradient} style={StyleSheet.absoluteFillObject} />
+                <LinearGradient colors={routine.gradient} style={StyleSheet.absoluteFill} />
               )}
             </Animated.View>
 
             <LinearGradient
               colors={["rgba(0,0,0,0.34)", "rgba(0,0,0,0)", "rgba(0,0,0,0.6)"]}
               locations={[0, 0.5, 1]}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
           </BlurTargetView>
 
@@ -329,7 +329,7 @@ export default function RoutineDetail() {
               {routine.image ? (
                 <Image source={{ uri: routine.image }} style={s.fill} resizeMode="cover" />
               ) : (
-                <LinearGradient colors={routine.gradient} style={StyleSheet.absoluteFillObject} />
+                <LinearGradient colors={routine.gradient} style={StyleSheet.absoluteFill} />
               )}
             </View>
 

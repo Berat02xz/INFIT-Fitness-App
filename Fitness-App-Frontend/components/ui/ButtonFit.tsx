@@ -93,8 +93,8 @@ const ButtonFit: React.FC<ButtonFitProps> = ({
                     >
                         {Platform.OS === 'ios' && (
                             <>
-                                <BlurView intensity={100} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFillObject} />
-                                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: backgroundColor, opacity: 0.5 }]} />
+                                <BlurView intensity={100} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFill} />
+                                <View style={[StyleSheet.absoluteFill, { backgroundColor: backgroundColor, opacity: 0.5 }]} />
                             </>
                         )}
                         {isLoading ? (
@@ -128,8 +128,8 @@ const ButtonFit: React.FC<ButtonFitProps> = ({
                 >
                     {Platform.OS === 'ios' && (
                         <>
-                            <BlurView intensity={100} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFillObject} />
-                            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: backgroundColor, opacity: 0.5 }]} />
+                            <BlurView intensity={100} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFill} />
+                            <View style={[StyleSheet.absoluteFill, { backgroundColor: backgroundColor, opacity: 0.5 }]} />
                         </>
                     )}
                     {isLoading ? (

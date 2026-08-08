@@ -6,24 +6,24 @@ import {
   useWindowDimensions,
   StyleSheet,
 } from "react-native";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import WorkoutScreen from "./workout/index";
-import NutritionScreen from "./nutrition/index";
-import ProfileScreen from "./profile/index";
 import { TabBar } from "@/components/ui/TabBarUi/TabBar";
 import { TabBarVisibilityProvider } from "@/components/ui/TabBarUi/TabBarVisibility";
 import AskBar from "@/components/ui/AskBar/AskBar";
 import { AskBarProvider, useChatTransition } from "@/components/ui/AskBar/AskBarContext";
 import { theme } from "@/constants/theme";
 import { ensureAuthenticatedSession } from "@/api/AuthSession";
-import { router } from "expo-router";
-
-const Tab = createBottomTabNavigator();
+import { router, Tabs } from "expo-router";
 
 // Persists across remounts so the correct tab is restored when
-// navigating back from a (screens) route.
+// navigating back from a (screens) route. lastActiveTab is the short
+// display name (used by AskBar/UI); lastActiveRouteName is whatever
+// expo-router actually registered the screen as (e.g. "workout/index")
+// and is the only thing safe to pass as initialRouteName. It starts
+// undefined so the navigator falls back to declaration order (workout)
+// on cold start instead of guessing a name that might not exist.
 let lastActiveTab = "workout";
+let lastActiveRouteName: string | undefined = undefined;
 
 function TabSurface({ children }: { children: React.ReactNode }) {
   const { height } = useWindowDimensions();
@@ -88,8 +88,8 @@ export default function AppLayout() {
     <AskBarProvider>
     <View style={{ flex: 1, flexDirection: isLargeScreen ? "row" : "column", backgroundColor: theme.backgroundColor }}>
       <TabSurface>
-      <Tab.Navigator
-        initialRouteName={lastActiveTab}
+      <Tabs
+        initialRouteName={lastActiveRouteName}
         tabBar={props =>
           isLargeScreen
             ? <TabBar {...props} vertical />
@@ -104,29 +104,19 @@ export default function AppLayout() {
           state: (e) => {
             const state = e.data?.state;
             if (state) {
-              const name = state.routes[state.index]?.name ?? "workout";
+              const rawName = state.routes[state.index]?.name ?? "workout";
+              lastActiveRouteName = rawName;
+              const name = rawName.replace(/\/index$/, "");
               lastActiveTab = name;
               setActiveTab(name);
             }
           },
         }}
       >
-        <Tab.Screen
-          name="workout"
-          component={WorkoutScreen}
-          options={{ tabBarLabel: "Workout" }}
-        />
-        <Tab.Screen
-          name="nutrition"
-          component={NutritionScreen}
-          options={{ tabBarLabel: "Nutrition" }}
-        />
-        <Tab.Screen
-          name="profile"
-          component={ProfileScreen}
-          options={{ tabBarLabel: "Profile" }}
-        />
-      </Tab.Navigator>
+        <Tabs.Screen name="workout" options={{ tabBarLabel: "Workout" }} />
+        <Tabs.Screen name="nutrition" options={{ tabBarLabel: "Nutrition" }} />
+        <Tabs.Screen name="profile" options={{ tabBarLabel: "Profile" }} />
+      </Tabs>
       </TabSurface>
 
       {!isLargeScreen && <AskBar activeTab={activeTab} />}
