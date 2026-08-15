@@ -1,3 +1,5 @@
+import "../global.css";
+
 import { routeForSession } from "@/api/AuthSession";
 import RevenueCatService from "@/api/RevenueCatService";
 import { useFonts } from "expo-font";
