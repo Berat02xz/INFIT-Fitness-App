@@ -157,6 +157,7 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const chatIslandGlow = useRef(new Animated.Value(0)).current;
   const settingsAnim = useRef(new Animated.Value(0)).current;
   const avatarFlip = useRef(new Animated.Value(0)).current;
+  const ignoreNativeBounce = useRef(false);
   const firstPulse = useRef(true);
   const inputRef = useRef<TextInput>(null);
 
@@ -164,7 +165,17 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
   const isFood = tab === "nutrition";
 
   // Clear search + dismiss any open settings island when switching tabs
-  useEffect(() => { setText(""); Keyboard.dismiss(); closeIsland(); }, [tab, closeIsland]);
+  useEffect(() => {
+    setText("");
+    Keyboard.dismiss();
+    closeIsland();
+
+    // The stretch is transient overscroll state. Reset it when the tab
+    // surface changes so a negative offset from the previous screen cannot
+    // make the bar mount expanded (and leave its rainbow glow visible).
+    barStretch.stopAnimation();
+    barStretch.setValue(0);
+  }, [tab, closeIsland, barStretch]);
 
   // Warm exercise pool (workout search + nothing else needs it)
   useEffect(() => {
@@ -329,13 +340,42 @@ export default function AskBar({ activeTab }: { activeTab: string }) {
 
   // Screens drive these via context (overscroll → grow + open chat)
   useAskBarRegister(useMemo(() => ({
+    onBeginDrag: () => {
+      ignoreNativeBounce.current = false;
+      barStretch.stopAnimation();
+    },
     onScroll: (y: number) => {
-      if (!chatIslandQ && scanState === "idle") {
-        barStretch.setValue(y < 0 ? Math.min(-y, 170) : 0);
+      if (chatIslandQ || scanState !== "idle") return;
+
+      if (y < 0) {
+        // After release, iOS keeps emitting negative offsets while its content
+        // bounces home. Ignore those and let our spring own the bar collapse.
+        if (!ignoreNativeBounce.current) barStretch.setValue(Math.min(-y, 170));
+        return;
       }
+
+      if (ignoreNativeBounce.current) {
+        ignoreNativeBounce.current = false;
+        return;
+      }
+      barStretch.setValue(0);
     },
     onEndDrag: (y: number) => {
-      if (!chatVisible && scanState === "idle" && y <= -PULL_TO_CHAT) enterChat();
+      ignoreNativeBounce.current = true;
+      if (!chatVisible && scanState === "idle" && y <= -PULL_TO_CHAT) {
+        enterChat();
+      } else {
+        // A short pull is only a preview. Spring back independently from the
+        // ScrollView's native bounce so release is smooth and cannot stick.
+        barStretch.stopAnimation();
+        Animated.spring(barStretch, {
+          toValue: 0,
+          damping: 18,
+          stiffness: 220,
+          mass: 0.72,
+          useNativeDriver: false,
+        }).start();
+      }
     },
     onPull: () => {
       if (!chatVisible && scanState === "idle") enterChat();

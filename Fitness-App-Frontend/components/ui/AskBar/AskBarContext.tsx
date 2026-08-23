@@ -15,6 +15,7 @@ const PULL_TO_CHAT = 130;
 // celebratory 3D flip + glow after a setting is changed.
 
 type ScrollHandlers = {
+  onBeginDrag?: (y: number) => void;
   onScroll?: (y: number) => void;
   onEndDrag?: (y: number) => void;
   onPull?: () => void;
@@ -87,6 +88,11 @@ export function useAskBarScroll() {
   const { scrollRef } = useCtx();
   const atTopRef = useRef(true);
   const firedRef = useRef(false);
+  const pullDistanceRef = useRef(0);
+
+  const onScrollBeginDrag = useCallback((y: number) => {
+    scrollRef.current.onBeginDrag?.(y);
+  }, [scrollRef]);
 
   const onScroll = useCallback((y: number) => {
     atTopRef.current = y <= 1;
@@ -97,8 +103,9 @@ export function useAskBarScroll() {
     scrollRef.current.onEndDrag?.(y);
   }, [scrollRef]);
 
-  // Android-only overscroll substitute. It drives the same live bar stretch as
-  // iOS bounce, then opens chat after the shared threshold.
+  // Android does not expose the same useful negative native overscroll as iOS,
+  // so use the custom pull gesture there. iOS keeps its native scroll physics
+  // for a smooth full-page scroll and native pull-to-chat.
   const pullGesture = useMemo(() => {
     const native = Gesture.Native();
     const pan = Gesture.Pan()
@@ -106,8 +113,13 @@ export function useAskBarScroll() {
       .activeOffsetY(10)
       .failOffsetX([-28, 28])
       .runOnJS(true)
+      .onBegin(() => {
+        pullDistanceRef.current = 0;
+        if (atTopRef.current) scrollRef.current.onBeginDrag?.(0);
+      })
       .onUpdate((e) => {
         if (!atTopRef.current || e.translationY <= 0) return;
+        pullDistanceRef.current = Math.min(e.translationY, 170);
         scrollRef.current.onScroll?.(-Math.min(e.translationY, 170));
         if (!firedRef.current && e.translationY > PULL_TO_CHAT) {
           firedRef.current = true;
@@ -116,12 +128,13 @@ export function useAskBarScroll() {
       })
       .onFinalize(() => {
         firedRef.current = false;
-        scrollRef.current.onScroll?.(0);
+        scrollRef.current.onEndDrag?.(-pullDistanceRef.current);
+        pullDistanceRef.current = 0;
       });
     return Gesture.Simultaneous(native, pan);
   }, [scrollRef]);
 
-  return { onScroll, onScrollEndDrag, pullGesture };
+  return { onScrollBeginDrag, onScroll, onScrollEndDrag, pullGesture };
 }
 
 /** The AskBar: register the scroll handlers it wants screens to drive. */

@@ -216,6 +216,9 @@ export default function NutritionScreen() {
           nestedScrollEnabled
           overScrollMode="always"
           scrollEventThrottle={16}
+          onScrollBeginDrag={(e: NativeSyntheticEvent<NativeScrollEvent>) =>
+            askScroll.onScrollBeginDrag(e.nativeEvent.contentOffset.y)
+          }
           onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) =>
             askScroll.onScroll(e.nativeEvent.contentOffset.y)
           }

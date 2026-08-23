@@ -224,6 +224,7 @@ export default function Profile() {
         contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 92, paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
+        onScrollBeginDrag={(e: NativeSyntheticEvent<NativeScrollEvent>) => askScroll.onScrollBeginDrag(e.nativeEvent.contentOffset.y)}
         onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => askScroll.onScroll(e.nativeEvent.contentOffset.y)}
         onScrollEndDrag={(e: NativeSyntheticEvent<NativeScrollEvent>) => askScroll.onScrollEndDrag(e.nativeEvent.contentOffset.y)}
       >
