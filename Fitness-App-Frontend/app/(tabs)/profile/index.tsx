@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, NativeSyntheticEvent, NativeScrollEvent, Platform, Switch } from "react-native";
 import { useAskBarScroll, useSettingsIsland } from "@/components/ui/AskBar/AskBarContext";
 import { router, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,6 +21,11 @@ import {
   OptionEditor,
   optionEditorHeight,
 } from "@/components/ui/Profile/SettingEditors";
+import {
+  getUseNativeIosTabs,
+  setUseNativeIosTabs,
+  subscribeToNativeIosTabs,
+} from "@/utils/tabBarPreference";
 
 // --- Design Tokens ---
 const D = {
@@ -39,6 +44,7 @@ export default function Profile() {
   const island = useSettingsIsland();
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [useNativeIosTabs, setUseNativeIosTabsState] = useState(true);
 
   const [caloriePlans, setCaloriePlans] = useState<any[]>([]);
   const [activity, setActivity] = useState<WeeklyMuscleActivity>(emptyActivity());
@@ -61,6 +67,15 @@ export default function Profile() {
 
   useEffect(() => {
     loadUserData();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+
+    const unsubscribe = subscribeToNativeIosTabs(setUseNativeIosTabsState);
+    getUseNativeIosTabs().then(setUseNativeIosTabsState).catch(() => undefined);
+
+    return unsubscribe;
   }, []);
 
   useFocusEffect(
@@ -237,6 +252,36 @@ export default function Profile() {
           </View>
         </FadeTranslate>
 
+        {Platform.OS === "ios" && (
+          <FadeTranslate order={0.4} delay={230}>
+            <Text style={s.sectionTitle}>Testing</Text>
+            <View style={s.group}>
+              <View style={s.row}>
+                <View style={s.rowIcon}>
+                  <Ionicons name="phone-portrait-outline" size={17} color={D.primary} />
+                </View>
+                <View style={s.testingCopy}>
+                  <Text style={s.rowLabel}>iOS tab style</Text>
+                  <Text style={s.testingValue}>
+                    {useNativeIosTabs ? "Native tabs" : "Android-style tabs"}
+                  </Text>
+                </View>
+                <Switch
+                  value={useNativeIosTabs}
+                  onValueChange={(value) => {
+                    setUseNativeIosTabsState(value);
+                    setUseNativeIosTabs(value).catch(() => undefined);
+                  }}
+                  trackColor={{ false: "#3A3A3C", true: D.primary }}
+                  thumbColor="#FFFFFF"
+                  ios_backgroundColor="#3A3A3C"
+                  accessibilityLabel="Use native iOS tabs"
+                />
+              </View>
+            </View>
+          </FadeTranslate>
+        )}
+
       </ScrollView>
       </GestureDetector>
     </View>
@@ -272,5 +317,7 @@ const s = StyleSheet.create({
   rowIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: "rgba(170,251,5,0.10)", alignItems: "center", justifyContent: "center", marginRight: 14 },
   rowLabel: { flex: 1, fontSize: 15, fontFamily: theme.medium, color: D.text },
   rowValue: { fontSize: 15, fontFamily: theme.medium, color: D.sub, textTransform: "capitalize", maxWidth: 150 },
+  testingCopy: { flex: 1 },
+  testingValue: { fontSize: 12, fontFamily: theme.medium, color: D.sub, marginTop: 2 },
   rowDivider: { position: "absolute", bottom: 0, left: 58, right: 0, height: 1, backgroundColor: D.border },
 });
