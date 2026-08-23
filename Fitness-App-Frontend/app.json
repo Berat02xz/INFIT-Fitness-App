@@ -75,7 +75,9 @@
           "motionPermission": "Allow Invicta to use motion data to count steps."
         }
       ],
-      "./plugins/with-watermelondb-simdjson"
+      "./plugins/with-watermelondb-simdjson",
+      "expo-image",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

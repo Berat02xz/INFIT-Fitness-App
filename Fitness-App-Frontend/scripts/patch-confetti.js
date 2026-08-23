@@ -1,3 +1,5 @@
+/* global __dirname */
+
 /**
  * Post-install patch for react-native-confetti-cannon.
  * Fixes: "Cannot destructure property 'count' of 'this.props' as it is undefined"
